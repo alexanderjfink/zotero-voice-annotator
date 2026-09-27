@@ -620,10 +620,17 @@ const VoiceAnnotator = {
   // page they're actually reading instead of anywhere in the document.
   getCurrentReaderPage(reader) {
     try {
-      const win = (reader && (reader._primaryView && reader._primaryView._iframeWindow)) || (reader && reader._iframeWindow);
-      if (win && win.PDFViewerApplication && win.PDFViewerApplication.pdfViewer) {
-        const n = win.PDFViewerApplication.pdfViewer.currentPageNumber;
-        if (typeof n === "number" && n > 0) return n - 1;
+      // The pdf.js viewer lives on the internal reader's primary view iframe.
+      const views = [
+        reader && reader._internalReader && reader._internalReader._primaryView && reader._internalReader._primaryView._iframeWindow,
+        reader && reader._primaryView && reader._primaryView._iframeWindow,
+        reader && reader._iframeWindow
+      ];
+      for (const win of views) {
+        if (win && win.PDFViewerApplication && win.PDFViewerApplication.pdfViewer) {
+          const n = win.PDFViewerApplication.pdfViewer.currentPageNumber;
+          if (typeof n === "number" && n > 0) return n - 1;
+        }
       }
     } catch (e) {}
     return undefined;
@@ -1266,10 +1273,11 @@ const VoiceAnnotator = {
         return;
       }
 
-      // Live mode resolves an utterance after a short pause (dedicated pref,
-      // capped by the batch silence timeout), so annotations appear while you
-      // dictate rather than only after several seconds of silence.
-      const silenceTimeout = Math.min(this.getSilenceTimeout(), this.getLiveSilenceTimeout());
+      // Live mode resolves an utterance after a short pause, so annotations appear
+      // while you dictate. The segmentation boundary uses the more generous
+      // batch silence timeout so a brief pause between the quote and the
+      // commentary doesn't split them and drop the commentary.
+      const silenceTimeout = this.getSilenceTimeout();
       const maxQuoteWords = 20;
       const available = this.live.words.length;
 
@@ -1364,7 +1372,14 @@ const VoiceAnnotator = {
       this.log("info", `Live: matching '${probe}'`);
       const pageHint = this.getCurrentReaderPage(this.live.reader);
       this.log("info", `Live: current page ${pageHint !== undefined ? pageHint + 1 : "unknown"}`);
-      const m = await this.matchQuoteInPDF(this.live.pdfPath, probe, pageHint, true);
+      let m = await this.matchQuoteInPDF(this.live.pdfPath, probe, pageHint, true);
+      // If the strict page restriction failed (stale/wrong page, or the
+      // transcription spilled past a page turn), retry across the whole PDF
+      // so a page miscue can't block all annotations.
+      if (!m && pageHint !== undefined) {
+        this.log("info", "Live: no match on current page; retrying across the whole PDF");
+        m = await this.matchQuoteInPDF(this.live.pdfPath, probe, undefined, false);
+      }
 
       // Fuzzy fallback: highlight the best-overlap sentence directly.
       if (m && m.fuzzy) {
@@ -1443,7 +1458,10 @@ const VoiceAnnotator = {
     const pageHint = this.getCurrentReaderPage(this.live.reader);
     this.log("info", `Live segment for trigger '${segment.trigger}': quote='${segment.quoteCandidate}'`);
 
-    const match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate, pageHint, true);
+    let match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate, pageHint, true);
+    if (!match && pageHint !== undefined) {
+      match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate, undefined, false);
+    }
     if (!match) {
       this.log("warn", "Live: no match for quote:", segment.quoteCandidate);
       return;
@@ -1453,9 +1471,14 @@ const VoiceAnnotator = {
     const quoteCandidate = expanded.quoteCandidate;
     const commentary = expanded.commentary || match.commentary || "";
 
-    const finalMatch = quoteCandidate !== segment.quoteCandidate
-      ? (await this.matchQuoteInPDF(pdfPath, quoteCandidate, pageHint, true)) || match
-      : match;
+    let finalMatch = match;
+    if (quoteCandidate !== segment.quoteCandidate) {
+      finalMatch = await this.matchQuoteInPDF(pdfPath, quoteCandidate, pageHint, true);
+      if (!finalMatch && pageHint !== undefined) {
+        finalMatch = await this.matchQuoteInPDF(pdfPath, quoteCandidate, undefined, false);
+      }
+      finalMatch = finalMatch || match;
+    }
 
     const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
     const existingAnnotation = appendToExisting ? await this.findExistingAnnotation(pdfItem, finalMatch.sentence, finalMatch) : null;
