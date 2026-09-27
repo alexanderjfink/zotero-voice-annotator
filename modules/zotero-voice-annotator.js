@@ -891,8 +891,8 @@ const VoiceAnnotator = {
   },
 
   getMicHelperPath() {
-    const profileDir = Zotero.getProfileDirectory();
-    const helperDir = profileDir.clone();
+    const profileFile = Zotero.File.pathToFile(Zotero.Profile.dir);
+    const helperDir = profileFile.clone();
     helperDir.append("zva-helper");
     if (!helperDir.exists()) {
       helperDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
