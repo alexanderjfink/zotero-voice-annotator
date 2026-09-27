@@ -903,23 +903,37 @@ const VoiceAnnotator = {
     return app.path;
   },
 
+  getMicHelperCommandPath() {
+    const profileFile = Zotero.File.pathToFile(Zotero.Profile.dir);
+    const helperDir = profileFile.clone();
+    helperDir.append("zva-helper");
+    const cmd = helperDir.clone();
+    cmd.append("command.txt");
+    return cmd.path;
+  },
+
   // Builds a tiny, invisible macOS helper .app that owns the microphone
   // permission. Zotero itself cannot be granted mic access on macOS (no usage
   // description, hardened runtime blocks audio input), but a small ad-hoc
   // signed helper without hardened runtime + with NSMicrophoneUsageDescription
-  // can be. The helper just exec()s python3, so the recording runs under the
-  // helper's TCC identity — no Terminal, no windows.
+  // can be. The helper reads its command from command.txt next to it and
+  // exec()s python3, so the recording runs under the helper's TCC identity —
+  // no Terminal, no windows.
   async ensureMicHelper() {
     const appPath = this.getMicHelperPath();
-    const appFile = Components.classes["@mozilla.org/file/local;1"]
-      .createInstance(Components.interfaces.nsIFile);
-    appFile.initWithPath(appPath);
+    const appFile = Zotero.File.pathToFile(appPath);
     const exeFile = appFile.clone();
     exeFile.append("Contents");
     exeFile.append("MacOS");
     exeFile.append("zva-helper");
 
-    if (exeFile.exists() && exeFile.isFile()) {
+    const markerFile = Zotero.File.pathToFile(this.getMicHelperCommandPath().replace(/command\.txt$/, "helper-version.txt"));
+    let marker = "";
+    try {
+      marker = (await Zotero.File.getContentsAsync(markerFile)).trim();
+    } catch (e) {}
+
+    if (exeFile.exists() && exeFile.isFile() && marker === "2") {
       this.log("debug", "Mic helper already present:", appPath);
       return appPath;
     }
@@ -940,12 +954,40 @@ const VoiceAnnotator = {
     const srcFile = contentsDir.clone();
     srcFile.append("zva-helper.c");
     const src = [
-      "#include <unistd.h>",
-      "int main(int argc, char *argv[]) {",
-      "    if (argc < 2) return 127;",
-      "    execv(argv[1], &argv[1]);",
-      "    return 127;",
-      "}"
+      '#include <mach-o/dyld.h>',
+      '#include <stdio.h>',
+      '#include <stdlib.h>',
+      '#include <string.h>',
+      '#include <unistd.h>',
+      '',
+      'int main(void) {',
+      '    char exe[4096];',
+      '    uint32_t size = sizeof(exe);',
+      '    if (_NSGetExecutablePath(exe, &size) != 0) return 127;',
+      '    /* exe = <dir>/Zotero Voice Annotator Helper.app/Contents/MacOS/zva-helper */',
+      '    char *p = strstr(exe, "/Contents/MacOS/");',
+      '    if (!p) return 127;',
+      '    *p = \'\\0\';',
+      '    char *slash = strrchr(exe, \'/\');',
+      '    if (!slash) return 127;',
+      '    char cmdpath[4600];',
+      '    snprintf(cmdpath, sizeof(cmdpath), "%.*s/command.txt", (int)(slash - exe), exe);',
+      '    FILE *f = fopen(cmdpath, "r");',
+      '    if (!f) return 127;',
+      '    char *argv[64];',
+      '    int argc = 0;',
+      '    char line[2048];',
+      '    while (argc < 62 && fgets(line, sizeof(line), f)) {',
+      '        line[strcspn(line, "\\r\\n")] = \'\\0\';',
+      '        if (!line[0]) continue;',
+      '        argv[argc++] = strdup(line);',
+      '    }',
+      '    fclose(f);',
+      '    argv[argc] = NULL;',
+      '    if (argc < 2) return 127;',
+      '    execv(argv[0], argv);',
+      '    return 127;',
+      '}'
     ].join("\n");
     await Zotero.File.putContentsAsync(srcFile, src);
 
@@ -971,6 +1013,9 @@ const VoiceAnnotator = {
     // Ad-hoc sign WITHOUT hardened runtime so macOS permits mic access
     await this.runCommand("/usr/bin/codesign", ["--force", "--sign", "-", appPath]);
 
+    // Record the version so we only rebuild when the launcher changes
+    await Zotero.File.putContentsAsync(markerFile, "2");
+
     this.log("info", "Built mic helper app:", appPath);
     return appPath;
   },
@@ -979,17 +1024,26 @@ const VoiceAnnotator = {
     const appPath = await this.ensureMicHelper();
     const pythonPath = this.getPythonPath();
     const helperPath = this.getHelperScriptPath();
-    const args = [
-      appPath, "--args",
+    const argv = [
       pythonPath, helperPath, "stream",
       "--model", model,
       "--flush-interval", String(flushInterval),
       "--stop-file", this.live.stopFilePath,
       "--output-file", this.live.streamOutPath
     ];
-    this.log("info", "Starting live capture (helper app):", args.join(" "));
-    this.live.processPromise = this.runCommandAsync("/usr/bin/open", args);
-    this.live.processPromise.catch(e => this.log("warn", "open error:", e.message));
+
+    // Write the command file the helper reads on launch (nsIFile.launch()
+    // can't pass command-line arguments).
+    await Zotero.File.putContentsAsync(Zotero.File.pathToFile(this.getMicHelperCommandPath()), argv.join("\n"));
+    this.log("info", "Starting live capture (helper app):", argv.join(" "));
+
+    // Launch the helper bundle via LaunchServices. Spawning the `open` CLI
+    // through nsIProcess fails ("Process failed to start") because `open`
+    // refuses to run from a detached/hidden process; nsIFile.launch() is the
+    // native API Firefox uses to open apps and works in this context.
+    const appFile = Zotero.File.pathToFile(appPath);
+    appFile.launch();
+    this.live.processPromise = Promise.resolve();
   },
 
   alertLiveError(msg) {
