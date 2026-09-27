@@ -72,12 +72,9 @@ The live workflow: read your PDF and speak, with no pre-recorded file needed. Hi
 
 While live annotation is active, a trigger word overlay appears in the top-right corner of the PDF (just below the reader toolbar). It shows the configured trigger phrases with their colors and the current status (Listening / Processing). It can be dragged, minimized, or disabled in preferences; it is hidden whenever live annotation is not running.
 
-**Microphone backend** (macOS): live mode records through the **Terminal backend** by default, because Zotero itself does not declare microphone access on macOS. On first use you need two one-time permissions:
+**Microphone backend** (macOS): live mode records through a tiny, invisible **helper app** by default. Zotero itself cannot be granted microphone access on macOS (its bundle doesn't declare it), so the plugin builds a small background helper that owns the mic permission and records without opening any windows. On first live use, macOS asks you to allow "Zotero Voice Annotator Helper" microphone access — click **Allow** (you can also check System Settings → Privacy & Security → Microphone).
 
-1. **Microphone** — System Settings → Privacy & Security → Microphone → enable **Terminal**.
-2. **Automation** — when Zotero first asks to control Terminal, click **Allow**.
-
-If you prefer, the Direct backend can be selected in Preferences (it only works if Zotero itself has been granted microphone access).
+The **Terminal** and **Direct** backends are available in Preferences if you prefer (Terminal routes recording through Terminal.app; Direct only works if Zotero itself has mic access).
 
 ### How trigger phrases work
 
@@ -107,7 +104,7 @@ Open **Zotero Preferences → Voice Annotator** to change:
 - **Whisper Model**: transcription model size (`tiny`, `base`, `small`, `medium`, `large`); larger is more accurate but slower. Used by both modes.
 - **Silence Timeout**: maximum silence gap (in seconds) before a spoken annotation commentary is cut off. Used by both modes.
 - **Recording Mode**: how live annotation captures your voice (`Toggle`, `Push-to-talk`, `Voice-activated`).
-- **Microphone Backend**: `Terminal` (recommended on macOS — records via Terminal, which you grant mic access to) or `Direct` (only if Zotero itself has mic access).
+- **Microphone Backend**: `Helper app` (recommended on macOS — a tiny invisible helper records the mic and asks for its own permission), `Terminal` (routes through Terminal.app), or `Direct` (only if Zotero itself has mic access).
 - **Keyboard Shortcut**: the key combination that starts/stops live annotation (click the field, then press the keys you want).
 - **Live Transcription Interval**: how often (in seconds) live audio is transcribed in the reader.
 - **Live Utterance Pause**: how long you must pause (in seconds) before live mode finalizes the current annotation. Default 1.5s; lower it for snappier annotations, raise it if quotes are being cut off.

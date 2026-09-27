@@ -163,7 +163,7 @@ const VoiceAnnotator = {
       liveShowOverlay: true,
       liveFlushInterval: 2,
       liveSilenceTimeout: 1.5,
-      liveMicBackend: "terminal",
+      liveMicBackend: "helper",
       liveOverlayPos: "",
       triggers: JSON.stringify(this.defaultTriggers)
     };
@@ -772,7 +772,9 @@ const VoiceAnnotator = {
     this.live.capturing = true;
 
     try {
-      if (backend === "terminal") {
+      if (backend === "helper") {
+        await this.spawnStreamViaHelper(model, flushInterval);
+      } else if (backend === "terminal") {
         await this.spawnStreamViaTerminal(model, flushInterval);
       } else {
         await this.spawnStreamDirect(model, flushInterval);
@@ -860,10 +862,18 @@ const VoiceAnnotator = {
   },
 
   getLiveMicBackend() {
-    return Zotero.Prefs.get("extensions.zotero-voice-annotator.liveMicBackend", true) || "terminal";
+    return Zotero.Prefs.get("extensions.zotero-voice-annotator.liveMicBackend", true) || "helper";
   },
 
   permissionHelpText(backend) {
+    if (backend === "helper") {
+      return [
+        "Microphone: if macOS asked to allow \"Zotero Voice Annotator Helper\", click Allow.",
+        "You can also check System Settings → Privacy & Security → Microphone.",
+        "",
+        "Then restart live mode."
+      ].join("\n");
+    }
     if (backend === "terminal") {
       return [
         "1. Microphone: System Settings → Privacy & Security → Microphone →",
@@ -875,9 +885,110 @@ const VoiceAnnotator = {
     }
     return [
       "Zotero does not declare microphone access on this macOS build.",
-      "Switch the Microphone Backend to \"Terminal\" in Preferences → Voice Annotator,",
-      "then grant Terminal microphone permission in System Settings → Privacy & Security → Microphone."
+      "Switch the Microphone Backend to \"Helper\" in Preferences → Voice Annotator",
+      "(the recommended option on macOS)."
     ].join("\n");
+  },
+
+  getMicHelperPath() {
+    const profileDir = Zotero.getProfileDirectory();
+    const helperDir = profileDir.clone();
+    helperDir.append("zva-helper");
+    if (!helperDir.exists()) {
+      helperDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
+    }
+    const app = helperDir.clone();
+    app.append("Zotero Voice Annotator Helper.app");
+    return app.path;
+  },
+
+  // Builds a tiny, invisible macOS helper .app that owns the microphone
+  // permission. Zotero itself cannot be granted mic access on macOS (no usage
+  // description, hardened runtime blocks audio input), but a small ad-hoc
+  // signed helper without hardened runtime + with NSMicrophoneUsageDescription
+  // can be. The helper just exec()s python3, so the recording runs under the
+  // helper's TCC identity — no Terminal, no windows.
+  async ensureMicHelper() {
+    const appPath = this.getMicHelperPath();
+    const appFile = Components.classes["@mozilla.org/file/local;1"]
+      .createInstance(Components.interfaces.nsIFile);
+    appFile.initWithPath(appPath);
+    const exeFile = appFile.clone();
+    exeFile.append("Contents");
+    exeFile.append("MacOS");
+    exeFile.append("zva-helper");
+
+    if (exeFile.exists() && exeFile.isFile()) {
+      this.log("debug", "Mic helper already present:", appPath);
+      return appPath;
+    }
+
+    // Create the bundle skeleton
+    const contentsDir = appFile.clone();
+    contentsDir.append("Contents");
+    if (!contentsDir.exists()) {
+      contentsDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
+    }
+    const macosDir = contentsDir.clone();
+    macosDir.append("MacOS");
+    if (!macosDir.exists()) {
+      macosDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
+    }
+
+    // Write the C launcher source
+    const srcFile = contentsDir.clone();
+    srcFile.append("zva-helper.c");
+    const src = [
+      "#include <unistd.h>",
+      "int main(int argc, char *argv[]) {",
+      "    if (argc < 2) return 127;",
+      "    execv(argv[1], &argv[1]);",
+      "    return 127;",
+      "}"
+    ].join("\n");
+    await Zotero.File.putContentsAsync(srcFile, src);
+
+    // Compile it (Command Line Tools provides /usr/bin/cc)
+    await this.runCommand("/usr/bin/cc", ["-o", exeFile.path, srcFile.path]);
+
+    // Write the Info.plist with the microphone usage description
+    const plistFile = contentsDir.clone();
+    plistFile.append("Info.plist");
+    const plist = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
+      '<plist version="1.0"><dict>\n' +
+      '<key>CFBundleIdentifier</key><string>com.alexanderfink.zva-helper</string>\n' +
+      '<key>CFBundleName</key><string>Zotero Voice Annotator Helper</string>\n' +
+      '<key>CFBundleExecutable</key><string>zva-helper</string>\n' +
+      '<key>CFBundlePackageType</key><string>APPL</string>\n' +
+      '<key>LSUIElement</key><true/>\n' +
+      '<key>NSMicrophoneUsageDescription</key>' +
+      '<string>Zotero Voice Annotator records your voice to create PDF highlight annotations while you read.</string>\n' +
+      '</dict></plist>\n';
+    await Zotero.File.putContentsAsync(plistFile, plist);
+
+    // Ad-hoc sign WITHOUT hardened runtime so macOS permits mic access
+    await this.runCommand("/usr/bin/codesign", ["--force", "--sign", "-", appPath]);
+
+    this.log("info", "Built mic helper app:", appPath);
+    return appPath;
+  },
+
+  async spawnStreamViaHelper(model, flushInterval) {
+    const appPath = await this.ensureMicHelper();
+    const pythonPath = this.getPythonPath();
+    const helperPath = this.getHelperScriptPath();
+    const args = [
+      appPath, "--args",
+      pythonPath, helperPath, "stream",
+      "--model", model,
+      "--flush-interval", String(flushInterval),
+      "--stop-file", this.live.stopFilePath,
+      "--output-file", this.live.streamOutPath
+    ];
+    this.log("info", "Starting live capture (helper app):", args.join(" "));
+    this.live.processPromise = this.runCommandAsync("/usr/bin/open", args);
+    this.live.processPromise.catch(e => this.log("warn", "open error:", e.message));
   },
 
   alertLiveError(msg) {
@@ -925,9 +1036,9 @@ const VoiceAnnotator = {
       }
     }
 
-    // With the Terminal backend, the osascript launcher returns before Python
-    // has finished its final flush; give it a moment to write remaining words.
-    if (this.getLiveMicBackend() === "terminal") {
+    // With the helper/Terminal backends the launcher returns before Python has
+    // finished its final flush; give it a moment to write remaining words.
+    if (this.getLiveMicBackend() !== "direct") {
       await Zotero.Promise.delay(3000);
     }
 
