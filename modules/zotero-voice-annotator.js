@@ -767,6 +767,7 @@ const VoiceAnnotator = {
     this.live.streamDone = false;
     this.live.streamReady = false;
     this.live.readyAlerted = false;
+    this.live.lastWordTime = Date.now();
 
     this.log("info", "Live stream output file:", outFile.path);
     this.live.capturing = true;
@@ -1079,6 +1080,7 @@ const VoiceAnnotator = {
     this.live.detectedStarts = new Set();
     this.live.scannedWords = 0;
     this.live.streamDone = false;
+    this.live.lastWordTime = 0;
     this.live.queue = Promise.resolve();
     if (this.live.streamOutPath) { try { this.removeFile(this.live.streamOutPath); } catch (e) {} }
     if (this.live.stopFilePath) { try { this.removeFile(this.live.stopFilePath); } catch (e) {} }
@@ -1126,7 +1128,15 @@ const VoiceAnnotator = {
       }
     }
 
-    await this.processStreamWords(false);
+    // If the user has finished speaking (no new words for longer than the
+    // live pause threshold) but a trigger is still pending, resolve it now.
+    // Without this, resolution waits for the word that closes the silence
+    // gap, which may never arrive if the user simply stops talking.
+    const livePauseMs = this.getLiveSilenceTimeout() * 1000;
+    const stalled = this.live.capturing
+      && this.live.pendingTriggers.some(t => !t.resolved)
+      && (Date.now() - this.live.lastWordTime) > livePauseMs;
+    await this.processStreamWords(stalled);
   },
 
   handleStreamLine(line) {
@@ -1154,7 +1164,8 @@ const VoiceAnnotator = {
             end: typeof w.end === "number" ? w.end : null
           });
         }
-        this.log("debug", `Live: received ${obj.words.length} words (total ${this.live.words.length})`);
+        this.live.lastWordTime = Date.now();
+        this.log("info", `Live: +${obj.words.length} words (total ${this.live.words.length})`);
         this.updateLiveOverlayForReader(this.live.reader, "processing");
       }
     } else if (obj.type === "done") {
@@ -1230,6 +1241,10 @@ const VoiceAnnotator = {
         await this.resolveLiveTrigger(occ, boundary);
       }
 
+      if (resolvable.length === 0 && pending.length > 0) {
+        this.log("info", `Live: ${pending.length} trigger(s) pending; waiting for boundary (${available} words)`);
+      }
+
       if (this.live.active) {
         this.updateLiveOverlayForReader(this.live.reader, "listening");
       }
@@ -1274,9 +1289,11 @@ const VoiceAnnotator = {
       let matchedCount = 0;
       for (let count = maxWords; count >= 1; count--) {
         const probe = contentWords.slice(0, count).map(w => w.word).join(" ");
+        this.log("info", `Live: matching '${probe}' (${count} words)`);
         const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
         if (m) {
           matchedCount = count;
+          this.log("info", `Live: matched ${count} words`);
           break;
         }
       }
