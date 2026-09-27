@@ -21,6 +21,7 @@ zip -r "${OUTPUT}" \
   chrome/ \
   locale/ \
   skin/ \
+  helper/ \
   README.md \
   -x "*/__pycache__/*" "*/.DS_Store"
 

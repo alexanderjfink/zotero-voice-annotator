@@ -912,112 +912,101 @@ const VoiceAnnotator = {
     return cmd.path;
   },
 
-  // Builds a tiny, invisible macOS helper .app that owns the microphone
+  // Installs a tiny, invisible macOS helper .app that owns the microphone
   // permission. Zotero itself cannot be granted mic access on macOS (no usage
   // description, hardened runtime blocks audio input), but a small ad-hoc
   // signed helper without hardened runtime + with NSMicrophoneUsageDescription
   // can be. The helper reads its command from command.txt next to it and
   // exec()s python3, so the recording runs under the helper's TCC identity —
   // no Terminal, no windows.
+  //
+  // The helper is prebuilt and pre-signed (see /helper in the repo) so the
+  // plugin never needs to invoke cc/codesign at runtime — spawning Apple's
+  // system binaries through nsIProcess is unreliable (open and codesign both
+  // fail to start). We only copy the bundled files byte-for-byte.
   async ensureMicHelper() {
     const appPath = this.getMicHelperPath();
-    const appFile = Zotero.File.pathToFile(appPath);
-    const exeFile = appFile.clone();
-    exeFile.append("Contents");
-    exeFile.append("MacOS");
-    exeFile.append("zva-helper");
-
     const markerFile = Zotero.File.pathToFile(this.getMicHelperCommandPath().replace(/command\.txt$/, "helper-version.txt"));
     let marker = "";
     try {
       marker = (await Zotero.File.getContentsAsync(markerFile)).trim();
     } catch (e) {}
 
-    if (exeFile.exists() && exeFile.isFile() && marker === "2") {
-      this.log("debug", "Mic helper already present:", appPath);
+    if (marker === "3") {
+      this.log("debug", "Mic helper already installed:", appPath);
       return appPath;
     }
 
-    // Create the bundle skeleton
+    const appFile = Zotero.File.pathToFile(appPath);
+    if (appFile.exists()) {
+      try {
+        appFile.remove(true);
+      } catch (e) {
+        this.log("warn", "Could not remove old mic helper:", e.message);
+      }
+    }
     const contentsDir = appFile.clone();
     contentsDir.append("Contents");
-    if (!contentsDir.exists()) {
-      contentsDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
-    }
+    contentsDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
     const macosDir = contentsDir.clone();
     macosDir.append("MacOS");
-    if (!macosDir.exists()) {
-      macosDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
-    }
+    macosDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
+    const codeSigDir = contentsDir.clone();
+    codeSigDir.append("_CodeSignature");
+    codeSigDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
 
-    // Write the C launcher source
-    const srcFile = contentsDir.clone();
-    srcFile.append("zva-helper.c");
-    const src = [
-      '#include <mach-o/dyld.h>',
-      '#include <stdio.h>',
-      '#include <stdlib.h>',
-      '#include <string.h>',
-      '#include <unistd.h>',
-      '',
-      'int main(void) {',
-      '    char exe[4096];',
-      '    uint32_t size = sizeof(exe);',
-      '    if (_NSGetExecutablePath(exe, &size) != 0) return 127;',
-      '    /* exe = <dir>/Zotero Voice Annotator Helper.app/Contents/MacOS/zva-helper */',
-      '    char *p = strstr(exe, "/Contents/MacOS/");',
-      '    if (!p) return 127;',
-      '    *p = \'\\0\';',
-      '    char *slash = strrchr(exe, \'/\');',
-      '    if (!slash) return 127;',
-      '    char cmdpath[4600];',
-      '    snprintf(cmdpath, sizeof(cmdpath), "%.*s/command.txt", (int)(slash - exe), exe);',
-      '    FILE *f = fopen(cmdpath, "r");',
-      '    if (!f) return 127;',
-      '    char *argv[64];',
-      '    int argc = 0;',
-      '    char line[2048];',
-      '    while (argc < 62 && fgets(line, sizeof(line), f)) {',
-      '        line[strcspn(line, "\\r\\n")] = \'\\0\';',
-      '        if (!line[0]) continue;',
-      '        argv[argc++] = strdup(line);',
-      '    }',
-      '    fclose(f);',
-      '    argv[argc] = NULL;',
-      '    if (argc < 2) return 127;',
-      '    execv(argv[0], argv);',
-      '    return 127;',
-      '}'
-    ].join("\n");
-    await Zotero.File.putContentsAsync(srcFile, src);
+    const base = this.rootURI + "helper/Zotero Voice Annotator Helper.app/Contents/";
+    await this.copyResourceToFile(base + "Info.plist", contentsDir.path + "/Info.plist");
+    await this.copyResourceToFile(base + "MacOS/zva-helper", macosDir.path + "/zva-helper", 0o755);
+    await this.copyResourceToFile(base + "_CodeSignature/CodeResources", codeSigDir.path + "/CodeResources");
 
-    // Compile it (Command Line Tools provides /usr/bin/cc)
-    await this.runCommand("/usr/bin/cc", ["-o", exeFile.path, srcFile.path]);
-
-    // Write the Info.plist with the microphone usage description
-    const plistFile = contentsDir.clone();
-    plistFile.append("Info.plist");
-    const plist = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
-      '<plist version="1.0"><dict>\n' +
-      '<key>CFBundleIdentifier</key><string>com.alexanderfink.zva-helper</string>\n' +
-      '<key>CFBundleName</key><string>Zotero Voice Annotator Helper</string>\n' +
-      '<key>CFBundleExecutable</key><string>zva-helper</string>\n' +
-      '<key>CFBundlePackageType</key><string>APPL</string>\n' +
-      '<key>LSUIElement</key><true/>\n' +
-      '<key>NSMicrophoneUsageDescription</key>' +
-      '<string>Zotero Voice Annotator records your voice to create PDF highlight annotations while you read.</string>\n' +
-      '</dict></plist>\n';
-    await Zotero.File.putContentsAsync(plistFile, plist);
-
-    // Ad-hoc sign WITHOUT hardened runtime so macOS permits mic access
-    await this.runCommand("/usr/bin/codesign", ["--force", "--sign", "-", appPath]);
-
-    // Record the version so we only rebuild when the launcher changes
-    await Zotero.File.putContentsAsync(markerFile, "2");
-
-    this.log("info", "Built mic helper app:", appPath);
+    await Zotero.File.putContentsAsync(markerFile, "3");
+    this.log("info", "Installed mic helper app:", appPath);
     return appPath;
+  },
+
+  // Copies a bundled (possibly binary) resource from the plugin xpi to a
+  // local file, byte-for-byte, so signatures and executability are preserved.
+  async copyResourceToFile(uri, destPath, permissions) {
+    const { IOUtils } = ChromeUtils.importESModule("resource://gre/modules/IOUtils.sys.mjs");
+    let bytes = null;
+    if (typeof fetch !== "undefined") {
+      try {
+        const resp = await fetch(uri);
+        if (resp.ok) {
+          bytes = new Uint8Array(await resp.arrayBuffer());
+        }
+      } catch (e) {
+        this.log("debug", "fetch failed for", uri, e.message);
+      }
+    }
+    if (!bytes) {
+      // Fallback: read the raw stream with NetUtil (byte-safe)
+      const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+      bytes = await new Promise((resolve, reject) => {
+        NetUtil.asyncFetch(
+          { uri: Services.io.newURI(uri), loadUsingSystemPrincipal: true },
+          (inputStream, status) => {
+            if (Components.isSuccessCode(status)) {
+              const available = inputStream.available();
+              const arr = new Uint8Array(available);
+              let offset = 0;
+              while (offset < available) {
+                const n = inputStream.read(arr, offset, available - offset);
+                if (n <= 0) break;
+                offset += n;
+              }
+              resolve(arr);
+            } else {
+              reject(new Error("Failed to read resource " + uri + ": " + status));
+            }
+          }
+        );
+      });
+    }
+    const opts = { mode: "overwrite" };
+    if (permissions) opts.permissions = permissions;
+    await IOUtils.write(destPath, bytes, opts);
   },
 
   async spawnStreamViaHelper(model, flushInterval) {
