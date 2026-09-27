@@ -116,7 +116,7 @@ const VoiceAnnotator = {
       try {
         Zotero.PreferencePanes.register({
           pluginID: this.id,
-          label: "Zotero Voice Annotator",
+          label: "Voice Annotator",
           src: this.rootURI + "chrome/content/preferences.xhtml",
           scripts: [this.rootURI + "chrome/content/preferences.js"],
           image: this.rootURI + "skin/icon-48.png"

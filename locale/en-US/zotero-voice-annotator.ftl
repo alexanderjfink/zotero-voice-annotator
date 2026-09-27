@@ -1,4 +1,4 @@
-zotero-voice-annotator-preferences-title = Zotero Voice Annotator Settings
+zotero-voice-annotator-preferences-title = Voice Annotator Settings
 zotero-voice-annotator-transcription-mode = Transcription Mode
 zotero-voice-annotator-transcription-mode-python = Python Script (faster-whisper)
 zotero-voice-annotator-transcription-mode-custom = Custom Command
