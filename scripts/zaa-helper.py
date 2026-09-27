@@ -398,7 +398,9 @@ def stream(args):
         except ImportError:
             device = "cpu"
             compute_type = "int8"
-        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        # Cap CPU threads so live transcription doesn't starve Zotero's UI.
+        # beam_size=5 matches the batch transcription accuracy.
+        model = WhisperModel(model_size, device=device, compute_type=compute_type, cpu_threads=4)
     except Exception as e:
         emit({"type": "error", "error": f"Failed to load Whisper model: {e}"})
         return
@@ -406,6 +408,8 @@ def stream(args):
     sample_rate = 16000
     flush_interval = max(0.5, float(args.flush_interval or 2))
     min_chunk = max(0.25, float(args.min_chunk or 0.5))
+    overlap_seconds = 1.5   # re-transcribe this much prior audio for context
+    max_buffer_seconds = 12.0
 
     # If a stale stop file exists from a previous run, clear it so we don't
     # exit immediately.
@@ -415,39 +419,36 @@ def stream(args):
         except OSError:
             pass
 
-    chunks = []            # list of numpy arrays (raw mic audio, not yet transcribed)
-    abs_total = 0          # running count of recorded samples (monotonic)
-    abs_flushed = 0        # samples transcribed so far (monotonic)
+    buffer = np.zeros(0, dtype=np.float32)  # rolling raw mic audio
+    buffer_start = 0                          # absolute sample index of buffer[0]
+    abs_total = 0                             # samples recorded (monotonic)
+    abs_flushed = 0                           # samples already emitted (monotonic)
+    last_word = None                          # (normalized, end) of last emitted word, for dedup
 
     def do_flush(force=False):
-        nonlocal abs_total, abs_flushed, chunks
-        available = abs_total - abs_flushed
-        if available < min_chunk * sample_rate and not force:
+        nonlocal buffer, buffer_start, abs_total, abs_flushed, last_word
+        if abs_total - abs_flushed < min_chunk * sample_rate and not force:
             return
-        if available <= 0:
-            return
-        try:
-            # Squeeze the (frames, channels=1) stream into a 1D array,
-            # which faster-whisper requires.
-            audio = np.concatenate(chunks).reshape(-1)
-        except Exception as e:
-            emit({"type": "error", "error": f"Audio buffer error: {e}"})
-            return
+        # Transcribe from a short overlap before the last flush point so the
+        # model has context for words that straddle the chunk boundary.
+        t_start = max(buffer_start, abs_flushed - int(overlap_seconds * sample_rate))
+        audio = buffer[t_start - buffer_start:]
         if audio.size == 0:
             return
-        offset = abs_flushed / sample_rate
+        offset = t_start / sample_rate
         try:
             segments, _info = model.transcribe(
                 audio,
-                beam_size=1,
+                beam_size=5,
                 word_timestamps=True,
-                condition_on_previous_text=False,
+                condition_on_previous_text=True,
                 vad_filter=True,
             )
         except Exception as e:
             emit({"type": "error", "error": f"Transcription error: {e}"})
             return
         words = []
+        emit_from = abs_flushed / sample_rate
         for segment in segments:
             sw = getattr(segment, "words", None)
             if not sw:
@@ -458,25 +459,35 @@ def stream(args):
                 else:
                     word_text, start, end = w.word, w.start, w.end
                 word_text = (word_text or "").strip()
-                if not normalize_word(word_text):
+                norm = normalize_word(word_text)
+                if not norm:
                     continue
+                wstart = float(start) + offset
+                wend = float(end) + offset
+                if wstart < emit_from:
+                    continue  # already emitted in a previous flush (overlap)
+                # Skip near-duplicate re-recognitions of the previous word
+                if last_word and last_word[0] == norm and wstart - last_word[1] < 0.3:
+                    continue
+                last_word = (norm, wend)
                 words.append({
                     "word": word_text,
-                    "normalized": normalize_word(word_text),
-                    "start": round(float(start) + offset, 3),
-                    "end": round(float(end) + offset, 3),
+                    "normalized": norm,
+                    "start": round(wstart, 3),
+                    "end": round(wend, 3),
                 })
         if words:
             emit({"type": "words", "offset": round(offset, 3), "words": words})
-        # Everything in the buffer has now been transcribed; clear it and
-        # advance the absolute counters so the next flush has correct
-        # absolute timestamps and bounded memory usage.
         abs_flushed = abs_total
-        chunks = []
+        # Trim the buffer to bound memory: keep only the last max_buffer_seconds
+        keep_from = max(buffer_start, abs_total - int(max_buffer_seconds * sample_rate))
+        if keep_from > buffer_start:
+            buffer = buffer[keep_from - buffer_start:]
+            buffer_start = keep_from
 
     def callback(indata, frames, time_info, status):
-        nonlocal abs_total
-        chunks.append(indata.copy())
+        nonlocal buffer, abs_total
+        buffer = np.concatenate([buffer, indata.reshape(-1)])
         abs_total += len(indata)
 
     emit({"type": "ready"})

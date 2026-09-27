@@ -1325,23 +1325,18 @@ const VoiceAnnotator = {
       const contentWords = this.live.words.slice(occ.endWordIndex, boundary);
       if (contentWords.length === 0) return;
 
-      // Progressively match the spoken words after the trigger against the PDF
-      const maxWords = Math.min(6, contentWords.length);
-      let matchedCount = 0;
-      for (let count = maxWords; count >= 1; count--) {
-        const probe = contentWords.slice(0, count).map(w => w.word).join(" ");
-        this.log("info", `Live: matching '${probe}' (${count} words)`);
-        const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
-        if (m) {
-          matchedCount = count;
-          this.log("info", `Live: matched ${count} words`);
-          break;
-        }
-      }
+      // The Python matcher already tries progressively (6..1 words) in one
+      // call and returns the best match with its matched word count, so a
+      // single spawn suffices (avoids six sequential process launches).
+      const probe = contentWords.slice(0, Math.min(6, contentWords.length)).map(w => w.word).join(" ");
+      this.log("info", `Live: matching '${probe}'`);
+      const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
+      const matchedCount = (m && m.matchedWords) ? Math.min(m.matchedWords, contentWords.length) : 0;
       if (matchedCount === 0) {
         this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} did not match the PDF; skipping`);
         return;
       }
+      this.log("info", `Live: matched ${matchedCount} words`);
 
       const segment = {
         trigger: occ.phrase,
@@ -2146,7 +2141,8 @@ const VoiceAnnotator = {
           pageIndex: json.pageIndex,
           pageLabel: json.pageLabel || String(json.pageIndex + 1),
           rects: json.rects,
-          commentary: json.commentary || ""
+          commentary: json.commentary || "",
+          matchedWords: json.matched_words || 0
         };
       }
       return null;
