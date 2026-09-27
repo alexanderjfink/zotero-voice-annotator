@@ -195,6 +195,7 @@
       SP("skipDuplicates", document.getElementById("zva-skipDuplicates").checked);
       SP("logLevel", document.getElementById("zva-logLevel").value);
       SP("liveMode", document.getElementById("zva-liveMode").value);
+      SP("liveMicBackend", document.getElementById("zva-liveMicBackend").value);
       SP("liveShortcut", document.getElementById("zva-liveShortcut").value);
       SP("liveFlushInterval", parseInt(document.getElementById("zva-liveFlushInterval").value, 10) || 2);
       SP("liveSilenceTimeout", parseFloat(document.getElementById("zva-liveSilenceTimeout").value) || 1.5);
@@ -219,6 +220,7 @@
       document.getElementById("zva-skipDuplicates").checked = P("skipDuplicates", true);
       document.getElementById("zva-logLevel").value = P("logLevel", "info");
       document.getElementById("zva-liveMode").value = P("liveMode", "toggle");
+      document.getElementById("zva-liveMicBackend").value = P("liveMicBackend", "terminal");
       document.getElementById("zva-liveShortcut").value = P("liveShortcut", "CmdOrCtrl+Shift+V");
       document.getElementById("zva-liveFlushInterval").value = P("liveFlushInterval", 2);
       document.getElementById("zva-liveSilenceTimeout").value = P("liveSilenceTimeout", 1.5);

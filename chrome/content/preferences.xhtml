@@ -131,6 +131,16 @@
     </hbox>
 
     <hbox class="mv-row" align="center">
+      <html:label for="zva-liveMicBackend">Microphone Backend:</html:label>
+      <menulist id="zva-liveMicBackend" oncommand="ZVAPrefs.saveAllPrefs()">
+        <menupopup>
+          <menuitem value="terminal" label="Terminal (macOS, recommended)" />
+          <menuitem value="zotero" label="Direct (requires Zotero mic access)" />
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox class="mv-row" align="center">
       <html:label for="zva-liveShortcut">Keyboard Shortcut:</html:label>
       <html:input type="text" id="zva-liveShortcut" readonly="readonly"
                   style="width: 180px; background: #f4f4f4;"

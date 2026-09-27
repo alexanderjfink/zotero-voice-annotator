@@ -162,6 +162,8 @@ const VoiceAnnotator = {
       liveShortcut: "CmdOrCtrl+Shift+V",
       liveShowOverlay: true,
       liveFlushInterval: 2,
+      liveSilenceTimeout: 1.5,
+      liveMicBackend: "terminal",
       liveOverlayPos: "",
       triggers: JSON.stringify(this.defaultTriggers)
     };
@@ -748,8 +750,7 @@ const VoiceAnnotator = {
 
   async startCapture() {
     if (this.live.capturing) return;
-    const pythonPath = this.getPythonPath();
-    const helperPath = this.getHelperScriptPath();
+    const backend = this.getLiveMicBackend();
     const model = Zotero.Prefs.get("extensions.zotero-voice-annotator.whisperModel", true) || "base";
     const flushInterval = Number(Zotero.Prefs.get("extensions.zotero-voice-annotator.liveFlushInterval", true)) || 2;
 
@@ -764,32 +765,132 @@ const VoiceAnnotator = {
     this.live.partialLine = "";
     this.live.lastRead = 0;
     this.live.streamDone = false;
+    this.live.streamReady = false;
+    this.live.readyAlerted = false;
 
-    const args = [
-      helperPath, "stream",
-      "--model", model,
-      "--flush-interval", String(flushInterval),
-      "--stop-file", stopFile.path,
-      "--output-file", outFile.path
-    ];
-    this.log("info", "Starting live capture:", pythonPath, args.join(" "));
     this.log("info", "Live stream output file:", outFile.path);
-
     this.live.capturing = true;
+
     try {
-      this.live.processPromise = this.runCommandAsync(pythonPath, args);
-      // Avoid unhandled rejection if the process fails to start
-      this.live.processPromise.catch(e => this.log("warn", "Live stream process error:", e.message));
+      if (backend === "terminal") {
+        await this.spawnStreamViaTerminal(model, flushInterval);
+      } else {
+        await this.spawnStreamDirect(model, flushInterval);
+      }
     } catch (err) {
       this.live.capturing = false;
-      this.updateLiveOverlayForReader(this.live.reader, "error");
-      throw err;
+      this.alertLiveError("Could not start the microphone stream:\n\n" + (err.message || String(err)) + "\n\nSee Tools → Developer → Debug Output Logging for details.");
+      return;
     }
 
     if (this.live.pollTimer) clearInterval(this.live.pollTimer);
     this.live.pollTimer = setInterval(() => {
       this.pollStreamOutput().catch(e => this.log("debug", "poll error:", e.message));
     }, 300);
+
+    // If "ready" never arrives (slow model load, missing mic permission, or
+    // automation not approved), surface guidance so the user isn't left staring
+    // at a silent overlay.
+    if (this.live.readyTimer) clearTimeout(this.live.readyTimer);
+    this.live.readyTimer = setTimeout(() => {
+      if (!this.live.streamReady && this.live.capturing && !this.live.readyAlerted) {
+        this.live.readyAlerted = true;
+        this.alertLiveError(
+          "Live capture is still starting...\n\n" +
+          "If this is the first run, Whisper may be downloading/loading the model (this can take a minute).\n\n" +
+          "If nothing happens after that, a permission may be missing:\n\n" +
+          this.permissionHelpText(backend)
+        );
+      }
+    }, 60000);
+  },
+
+  async spawnStreamDirect(model, flushInterval) {
+    const pythonPath = this.getPythonPath();
+    const helperPath = this.getHelperScriptPath();
+    const args = [
+      helperPath, "stream",
+      "--model", model,
+      "--flush-interval", String(flushInterval),
+      "--stop-file", this.live.stopFilePath,
+      "--output-file", this.live.streamOutPath
+    ];
+    this.log("info", "Starting live capture (direct):", pythonPath, args.join(" "));
+    this.live.processPromise = this.runCommandAsync(pythonPath, args);
+    this.live.processPromise.catch(e => this.log("warn", "Live stream process error:", e.message));
+  },
+
+  async spawnStreamViaTerminal(model, flushInterval) {
+    const pythonPath = this.getPythonPath();
+    const helperPath = this.getHelperScriptPath();
+    const sq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    const cmd = [
+      sq(pythonPath), sq(helperPath), "stream",
+      "--model", sq(model),
+      "--flush-interval", String(flushInterval),
+      "--stop-file", sq(this.live.stopFilePath),
+      "--output-file", sq(this.live.streamOutPath)
+    ].join(" ") + " >/dev/null 2>&1; exit";
+
+    // Escape for the AppleScript double-quoted string
+    const asEsc = cmd.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+    const script = [
+      'tell application "Terminal"',
+      '  set w to do script "' + asEsc + '"',
+      '  delay 1',
+      '  try',
+      '    set visible of w to false',
+      '  end try',
+      'end tell'
+    ].join("\n");
+
+    this.log("info", "Starting live capture (Terminal backend)");
+    this.live.processPromise = this.runCommandAsync("/usr/bin/osascript", ["-e", script]);
+    this.live.processPromise.catch(e => this.log("warn", "osascript error:", e.message));
+    // osascript returns quickly (the Python stream keeps running in Terminal).
+    // If it failed, the most likely cause is Automation permission.
+    this.live.processPromise.then(exitCode => {
+      if (!this.live.streamReady && exitCode !== 0 && this.live.capturing && !this.live.readyAlerted) {
+        this.live.readyAlerted = true;
+        this.alertLiveError(
+          "Could not launch the microphone in Terminal.\n\n" + this.permissionHelpText("terminal")
+        );
+      }
+    });
+  },
+
+  getLiveMicBackend() {
+    return Zotero.Prefs.get("extensions.zotero-voice-annotator.liveMicBackend", true) || "terminal";
+  },
+
+  permissionHelpText(backend) {
+    if (backend === "terminal") {
+      return [
+        "1. Microphone: System Settings → Privacy & Security → Microphone →",
+        "   enable Terminal (the recording runs through Terminal).",
+        "2. Automation: if Zotero asked to control Terminal, click Allow.",
+        "",
+        "Then restart live mode."
+      ].join("\n");
+    }
+    return [
+      "Zotero does not declare microphone access on this macOS build.",
+      "Switch the Microphone Backend to \"Terminal\" in Preferences → Voice Annotator,",
+      "then grant Terminal microphone permission in System Settings → Privacy & Security → Microphone."
+    ].join("\n");
+  },
+
+  alertLiveError(msg) {
+    this.log("error", msg);
+    this.updateLiveOverlayForReader(this.live.reader, "error");
+    try {
+      const win = Zotero.getMainWindows()[0];
+      if (win) {
+        Zotero.alert(win, "Zotero Voice Annotator", msg);
+      }
+    } catch (e) {
+      this.log("debug", "alertLiveError:", e.message);
+    }
   },
 
   async stopCapture(final) {
@@ -801,6 +902,10 @@ const VoiceAnnotator = {
     if (this.live.pollTimer) {
       clearInterval(this.live.pollTimer);
       this.live.pollTimer = null;
+    }
+    if (this.live.readyTimer) {
+      clearTimeout(this.live.readyTimer);
+      this.live.readyTimer = null;
     }
 
     // Signal the Python process to stop (it flushes remaining audio, then exits)
@@ -818,6 +923,12 @@ const VoiceAnnotator = {
       } catch (e) {
         this.log("warn", "Stream process did not exit cleanly:", e.message);
       }
+    }
+
+    // With the Terminal backend, the osascript launcher returns before Python
+    // has finished its final flush; give it a moment to write remaining words.
+    if (this.getLiveMicBackend() === "terminal") {
+      await Zotero.Promise.delay(3000);
     }
 
     // Pick up any remaining output and force-resolve pending triggers
@@ -848,6 +959,10 @@ const VoiceAnnotator = {
     this.live.pdfItem = null;
     this.live.pdfPath = null;
     this.live.processPromise = null;
+    if (this.live.readyTimer) {
+      clearTimeout(this.live.readyTimer);
+      this.live.readyTimer = null;
+    }
     this.live.words = [];
     this.live.pendingTriggers = [];
     this.live.detectedStarts = new Set();
@@ -912,6 +1027,11 @@ const VoiceAnnotator = {
     }
     if (obj.type === "ready") {
       this.log("info", "Live capture ready");
+      this.live.streamReady = true;
+      if (this.live.readyTimer) {
+        clearTimeout(this.live.readyTimer);
+        this.live.readyTimer = null;
+      }
       this.updateLiveOverlayForReader(this.live.reader, "listening");
     } else if (obj.type === "words") {
       if (Array.isArray(obj.words) && obj.words.length > 0) {
@@ -929,15 +1049,15 @@ const VoiceAnnotator = {
     } else if (obj.type === "done") {
       this.live.streamDone = true;
     } else if (obj.type === "error") {
+      if (this.live.readyTimer) {
+        clearTimeout(this.live.readyTimer);
+        this.live.readyTimer = null;
+      }
       this.log("error", "Live capture error:", obj.error);
-      this.updateLiveOverlayForReader(this.live.reader, "error");
-      // Surface the error visibly — the debug console may be hard to read.
-      try {
-        const win = Zotero.getMainWindows()[0];
-        if (win) {
-          Zotero.alert(win, "Zotero Voice Annotator", "Live capture failed:\n\n" + (obj.error || "Unknown error"));
-        }
-      } catch (e) {}
+      this.alertLiveError(
+        "Live capture failed:\n\n" + (obj.error || "Unknown error") + "\n\n" +
+        this.permissionHelpText(this.getLiveMicBackend())
+      );
       // The stream is unusable; tear down.
       this.exitLive().catch(e => this.log("warn", "exitLive after error:", e));
     }

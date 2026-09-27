@@ -72,7 +72,12 @@ The live workflow: read your PDF and speak, with no pre-recorded file needed. Hi
 
 While live annotation is active, a trigger word overlay appears in the top-right corner of the PDF (just below the reader toolbar). It shows the configured trigger phrases with their colors and the current status (Listening / Processing). It can be dragged, minimized, or disabled in preferences; it is hidden whenever live annotation is not running.
 
-Note: live mode requires microphone access for the Python process. On macOS you may need to grant microphone permission to Zotero (or the terminal running Python) under System Settings → Privacy & Security → Microphone.
+**Microphone backend** (macOS): live mode records through the **Terminal backend** by default, because Zotero itself does not declare microphone access on macOS. On first use you need two one-time permissions:
+
+1. **Microphone** — System Settings → Privacy & Security → Microphone → enable **Terminal**.
+2. **Automation** — when Zotero first asks to control Terminal, click **Allow**.
+
+If you prefer, the Direct backend can be selected in Preferences (it only works if Zotero itself has been granted microphone access).
 
 ### How trigger phrases work
 
@@ -102,6 +107,7 @@ Open **Zotero Preferences → Voice Annotator** to change:
 - **Whisper Model**: transcription model size (`tiny`, `base`, `small`, `medium`, `large`); larger is more accurate but slower. Used by both modes.
 - **Silence Timeout**: maximum silence gap (in seconds) before a spoken annotation commentary is cut off. Used by both modes.
 - **Recording Mode**: how live annotation captures your voice (`Toggle`, `Push-to-talk`, `Voice-activated`).
+- **Microphone Backend**: `Terminal` (recommended on macOS — records via Terminal, which you grant mic access to) or `Direct` (only if Zotero itself has mic access).
 - **Keyboard Shortcut**: the key combination that starts/stops live annotation (click the field, then press the keys you want).
 - **Live Transcription Interval**: how often (in seconds) live audio is transcribed in the reader.
 - **Live Utterance Pause**: how long you must pause (in seconds) before live mode finalizes the current annotation. Default 1.5s; lower it for snappier annotations, raise it if quotes are being cut off.
