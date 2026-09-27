@@ -262,12 +262,75 @@ def match_quote(args):
         doc.close()
 
         result = find_quote_in_words(words, args.quote, args.page_hint)
+        # Require a solid exact match (>= 3 words); anything less is likely a
+        # garbled live transcription. Fall back to a sentence-level fuzzy match
+        # so a mostly-correct quote still highlights the right sentence.
+        if result and result.get("matched_words", 0) >= 3:
+            write_output(args.output, {**result, "found": True})
+            return
+
+        fuzzy = fuzzy_sentence_match(words, args.quote, args.page_hint)
+        if fuzzy:
+            write_output(args.output, {**fuzzy, "found": True, "fuzzy": True})
+            return
+
         if result:
             write_output(args.output, {**result, "found": True})
         else:
             write_output(args.output, {"found": False, "error": "Quote not found in PDF"})
     except Exception as e:
         write_output(args.output, {"found": False, "error": str(e)})
+
+
+def fuzzy_sentence_match(words, quote_text, page_hint=None, min_overlap=3):
+    """Find the PDF sentence with the highest normalized word overlap with
+    the spoken quote. Used for live mode where transcription is imperfect."""
+    spoken = [normalize_word(w) for w in quote_text.split() if normalize_word(w)]
+    if len(spoken) < min_overlap:
+        return None
+
+    # Split the PDF words into sentences at . ! ?
+    sentence_ranges = []
+    cur_start = 0
+    for i, w in enumerate(words):
+        if w["text"].endswith((".", "!", "?")):
+            sentence_ranges.append((cur_start, i + 1))
+            cur_start = i + 1
+    if cur_start < len(words):
+        sentence_ranges.append((cur_start, len(words)))
+
+    best = None
+    best_score = 0
+    for start, end in sentence_ranges:
+        sentence_words = words[start:end]
+        if not sentence_words:
+            continue
+        norm_set = set(sw["normalized"] for sw in sentence_words if sw["normalized"])
+        # Count distinct spoken words present in this sentence
+        present = sum(1 for wn in spoken if wn in norm_set)
+        # Prefer sentences that contain the early spoken words (the quote's
+        # beginning) and score higher overall
+        early = sum(1 for wn in spoken[:3] if wn in norm_set)
+        score = present + early
+        if score > best_score and present >= min_overlap:
+            best_score = score
+            best = (start, end, present)
+
+    if not best:
+        return None
+
+    start, end, present = best
+    sentence_words = words[start:end]
+    word_rects = [w["rect"] for w in sentence_words]
+    merged_rects = merge_word_rects(word_rects)
+    page = sentence_words[0]["page"]
+    return {
+        "sentence": " ".join(w["text"] for w in sentence_words),
+        "pageIndex": page,
+        "pageLabel": str(page + 1),
+        "rects": merged_rects,
+        "matched_words": present,
+    }
 
 
 def locate(args):

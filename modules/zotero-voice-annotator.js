@@ -1343,15 +1343,36 @@ const VoiceAnnotator = {
       const contentWords = this.live.words.slice(occ.endWordIndex, boundary);
       if (contentWords.length === 0) return;
 
-      // The Python matcher already tries progressively (6..1 words) in one
-      // call and returns the best match with its matched word count, so a
-      // single spawn suffices (avoids six sequential process launches).
+      // The Python matcher tries progressively (6..1 words) in one call and
+      // returns the best match; if the exact match is weak (< 3 words) it
+      // falls back to a sentence-level fuzzy match for imperfect live
+      // transcriptions.
       const probe = contentWords.slice(0, Math.min(6, contentWords.length)).map(w => w.word).join(" ");
       this.log("info", `Live: matching '${probe}'`);
       const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
+
+      // Fuzzy fallback: highlight the best-overlap sentence directly.
+      if (m && m.fuzzy) {
+        this.log("info", `Live: fuzzy match (${m.matchedWords} words overlap): ${m.sentence}`);
+        const commentary = contentWords.map(w => w.word).join(" ");
+        const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
+        const existingAnnotation = appendToExisting ? await this.findExistingAnnotation(this.live.pdfItem, m.sentence, m) : null;
+        if (existingAnnotation) {
+          await this.appendCommentaryToAnnotation(existingAnnotation, commentary);
+          this.log("info", "Live: appended commentary (fuzzy):", m.sentence);
+        } else {
+          await this.createHighlightAnnotation(this.live.pdfItem, m.sentence, commentary, m, occ.color);
+          this.log("info", "Live: created annotation (fuzzy):", m.sentence);
+        }
+        return;
+      }
+
       const matchedCount = (m && m.matchedWords) ? Math.min(m.matchedWords, contentWords.length) : 0;
-      if (matchedCount === 0) {
-        this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} did not match the PDF; skipping (match=${m ? JSON.stringify(m) : "null"})`);
+      // A 1-word exact match is unreliable (the matcher just picks the first
+      // occurrence of that word in the PDF); skip it rather than highlight an
+      // arbitrary word.
+      if (matchedCount < 2) {
+        this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} has no reliable match (${matchedCount} word(s)); skipping`);
         return;
       }
       this.log("info", `Live: matched ${matchedCount} words`);
@@ -2162,7 +2183,8 @@ const VoiceAnnotator = {
           pageLabel: json.pageLabel || String(json.pageIndex + 1),
           rects: json.rects,
           commentary: json.commentary || "",
-          matchedWords: json.matched_words || 0
+          matchedWords: json.matched_words || 0,
+          fuzzy: !!json.fuzzy
         };
       }
       // Diagnostic: show exactly what the helper returned so a failure here
