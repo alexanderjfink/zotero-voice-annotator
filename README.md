@@ -8,7 +8,7 @@ Zotero Voice Annotator listens to audio attachments in your Zotero library, tran
 
 You can define multiple trigger phrases, each with its own highlight color. For example:
 
-- `quote` → yellow
+- `Highlight` → yellow
 - `Main Theory` → blue
 - `Key Point` → red
 - `Definition` → green
@@ -71,7 +71,7 @@ Multi-word triggers such as "Main Theory" or "Key Point" are supported.
 
 Open **Zotero Preferences → Zotero Voice Annotator** to change:
 
-- **Trigger Words &amp; Colors**: add, remove, or edit trigger phrases and assign each a highlight color. Defaults are `quote` (yellow), `Main Theory` (blue), `Key Point` (red), and `Definition` (green).
+- **Trigger Words &amp; Colors**: add, remove, or edit trigger phrases and assign each a highlight color. Defaults are `Highlight` (yellow), `Main Theory` (blue), `Key Point` (red), and `Definition` (green).
 - **Silence Timeout**: maximum silence gap (in seconds) before a spoken annotation commentary is cut off. Requires Python transcription mode with word timestamps.
 - **Whisper Model**: transcription model size (`tiny`, `base`, `small`, `medium`, `large`); larger is more accurate but slower.
 - **Python Path**: path to the Python interpreter if Zotero doesn't use the right one.

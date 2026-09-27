@@ -42,7 +42,7 @@ const VoiceAnnotator = {
   },
 
   defaultTriggers: [
-    { phrase: "quote", color: "#ffd400" },
+    { phrase: "Highlight", color: "#ffd400" },
     { phrase: "Main Theory", color: "#2ea8e5" },
     { phrase: "Key Point", color: "#ff6666" },
     { phrase: "Definition", color: "#5fb236" }

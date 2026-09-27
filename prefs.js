@@ -4,7 +4,7 @@ pref("extensions.zotero-voice-annotator.helperScriptPath", "");
 pref("extensions.zotero-voice-annotator.customCommandPath", "");
 pref("extensions.zotero-voice-annotator.customCommandArgs", "");
 pref("extensions.zotero-voice-annotator.whisperModel", "base");
-pref("extensions.zotero-voice-annotator.triggers", '[{"phrase":"quote","color":"#ffd400"},{"phrase":"Main Theory","color":"#2ea8e5"},{"phrase":"Key Point","color":"#ff6666"},{"phrase":"Definition","color":"#5fb236"}]');
+pref("extensions.zotero-voice-annotator.triggers", '[{"phrase":"Highlight","color":"#ffd400"},{"phrase":"Main Theory","color":"#2ea8e5"},{"phrase":"Key Point","color":"#ff6666"},{"phrase":"Definition","color":"#5fb236"}]');
 pref("extensions.zotero-voice-annotator.fuzzyThreshold", "0.6");
 pref("extensions.zotero-voice-annotator.silenceTimeout", 5);
 pref("extensions.zotero-voice-annotator.skipDuplicates", true);
