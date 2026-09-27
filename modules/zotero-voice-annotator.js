@@ -1169,14 +1169,16 @@ const VoiceAnnotator = {
       }
     }
 
-    // If the user has finished speaking (no new words for longer than the
-    // live pause threshold) but a trigger is still pending, resolve it now.
-    // Without this, resolution waits for the word that closes the silence
-    // gap, which may never arrive if the user simply stops talking.
-    const livePauseMs = this.getLiveSilenceTimeout() * 1000;
+    // If the user has finished speaking but a trigger is still pending with
+    // actual content, resolve it now. The stall threshold must exceed the
+    // stream's flush interval (words arrive in bursts every ~2s), otherwise
+    // normal chunked speech would be mistaken for silence and the trigger
+    // would be consumed before its quote words arrive.
+    const flushInterval = Number(Zotero.Prefs.get("extensions.zotero-voice-annotator.liveFlushInterval", true)) || 2;
+    const stallThresholdMs = Math.max(this.getLiveSilenceTimeout() * 1000, flushInterval * 1000 + 500);
     const stalled = this.live.capturing
-      && this.live.pendingTriggers.some(t => !t.resolved)
-      && (Date.now() - this.live.lastWordTime) > livePauseMs;
+      && this.live.pendingTriggers.some(t => !t.resolved && (this.live.words.length - t.endWordIndex) > 0)
+      && (Date.now() - this.live.lastWordTime) > stallThresholdMs;
     await this.processStreamWords(stalled);
   },
 
@@ -1277,13 +1279,23 @@ const VoiceAnnotator = {
       }
 
       for (const { occ, boundary } of resolvable) {
+        // Only consume the trigger once there is actual spoken content after
+        // it to evaluate. Otherwise the trigger stays pending so the quote
+        // words can be annotated when they arrive in a later stream chunk.
+        const contentLen = Math.min(boundary, this.live.words.length) - occ.endWordIndex;
+        if (contentLen <= 0) continue;
         occ.resolved = true;
         this.updateLiveOverlayForReader(this.live.reader, "processing");
         await this.resolveLiveTrigger(occ, boundary);
       }
 
       if (resolvable.length === 0 && pending.length > 0) {
-        this.log("info", `Live: ${pending.length} trigger(s) pending; waiting for boundary (${available} words)`);
+        // Throttle this diagnostic to at most once every 2s
+        const now = Date.now();
+        if (!this.live.lastWaitLog || now - this.live.lastWaitLog > 2000) {
+          this.live.lastWaitLog = now;
+          this.log("info", `Live: ${pending.length} trigger(s) pending; waiting for boundary (${available} words)`);
+        }
       }
 
       if (this.live.active) {
