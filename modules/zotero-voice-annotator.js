@@ -1436,7 +1436,9 @@ const VoiceAnnotator = {
         }
       };
       try {
-        if (Zotero.isWin && process.runwAsync) {
+        // Prefer runwAsync (Unicode-aware) on all platforms — runAsync mangles
+        // non-ASCII characters in args on macOS (e.g. "Zgurić" -> "Zguri\u0007").
+        if (process.runwAsync) {
           process.runwAsync(args, args.length, observer);
         } else {
           process.runAsync(args, args.length, observer);
@@ -1712,8 +1714,8 @@ const VoiceAnnotator = {
     process.init(cmdFile);
     process.startHidden = true;
 
-    // Use runw for unicode support on Windows, run otherwise
-    const useUnicode = Zotero.isWin;
+    // Use runwAsync (Unicode-aware) when available — runAsync mangles
+    // non-ASCII characters in args on macOS (e.g. "Zgurić" -> "Zguri\u0007")
     const exitCode = await new Promise((resolve, reject) => {
       const observer = {
         observe(subject, topic) {
@@ -1725,7 +1727,7 @@ const VoiceAnnotator = {
         }
       };
       try {
-        if (useUnicode && process.runwAsync) {
+        if (process.runwAsync) {
           process.runwAsync(args, args.length, observer);
         } else {
           process.runAsync(args, args.length, observer);
@@ -1772,7 +1774,7 @@ const VoiceAnnotator = {
         }
       };
       try {
-        if (Zotero.isWin && process.runwAsync) {
+        if (process.runwAsync) {
           process.runwAsync(shellArgs, shellArgs.length, observer);
         } else {
           process.runAsync(shellArgs, shellArgs.length, observer);
