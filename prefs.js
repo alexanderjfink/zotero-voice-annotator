@@ -13,4 +13,5 @@ pref("extensions.zotero-voice-annotator.liveMode", "toggle");
 pref("extensions.zotero-voice-annotator.liveShortcut", "CmdOrCtrl+Shift+V");
 pref("extensions.zotero-voice-annotator.liveShowOverlay", true);
 pref("extensions.zotero-voice-annotator.liveFlushInterval", 2);
+pref("extensions.zotero-voice-annotator.liveSilenceTimeout", 1.5);
 pref("extensions.zotero-voice-annotator.liveOverlayPos", "");

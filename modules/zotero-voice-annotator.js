@@ -78,6 +78,16 @@ const VoiceAnnotator = {
     }
   },
 
+  getLiveSilenceTimeout() {
+    try {
+      const val = Zotero.Prefs.get("extensions.zotero-voice-annotator.liveSilenceTimeout", true);
+      const num = Number(val);
+      return Number.isFinite(num) && num > 0 ? num : 1.5;
+    } catch (e) {
+      return 1.5;
+    }
+  },
+
   formatLogArg(a) {
     if (a && (a.message || a.stack)) {
       const parts = [];
@@ -763,6 +773,7 @@ const VoiceAnnotator = {
       "--output-file", outFile.path
     ];
     this.log("info", "Starting live capture:", pythonPath, args.join(" "));
+    this.log("info", "Live stream output file:", outFile.path);
 
     this.live.capturing = true;
     try {
@@ -920,6 +931,13 @@ const VoiceAnnotator = {
     } else if (obj.type === "error") {
       this.log("error", "Live capture error:", obj.error);
       this.updateLiveOverlayForReader(this.live.reader, "error");
+      // Surface the error visibly — the debug console may be hard to read.
+      try {
+        const win = Zotero.getMainWindows()[0];
+        if (win) {
+          Zotero.alert(win, "Zotero Voice Annotator", "Live capture failed:\n\n" + (obj.error || "Unknown error"));
+        }
+      } catch (e) {}
       // The stream is unusable; tear down.
       this.exitLive().catch(e => this.log("warn", "exitLive after error:", e));
     }
@@ -944,7 +962,10 @@ const VoiceAnnotator = {
         return;
       }
 
-      const silenceTimeout = this.getSilenceTimeout();
+      // Live mode resolves an utterance after a short pause (dedicated pref,
+      // capped by the batch silence timeout), so annotations appear while you
+      // dictate rather than only after several seconds of silence.
+      const silenceTimeout = Math.min(this.getSilenceTimeout(), this.getLiveSilenceTimeout());
       const maxQuoteWords = 12;
       const available = this.live.words.length;
 
@@ -993,7 +1014,7 @@ const VoiceAnnotator = {
     if (scanFrom >= this.live.words.length) return;
 
     const slice = this.live.words.slice(scanFrom);
-    const occs = this.findTriggerOccurrences(slice, triggers);
+    const occs = this.findTriggerOccurrences(slice, triggers, true);
     for (const o of occs) {
       const start = scanFrom + o.startWordIndex;
       const end = scanFrom + o.endWordIndex;
@@ -1607,7 +1628,7 @@ const VoiceAnnotator = {
     return word.replace(/[^\w\-]/g, "").toLowerCase();
   },
 
-  findTriggerOccurrences(wordList, triggers) {
+  findTriggerOccurrences(wordList, triggers, quiet) {
     const occurrences = [];
 
     // Sort triggers by word count descending so longer phrases are checked first
@@ -1616,7 +1637,9 @@ const VoiceAnnotator = {
       .filter(t => t.words.length > 0)
       .sort((a, b) => b.words.length - a.words.length);
 
-    this.log("debug", "Looking for triggers:", sortedTriggers.map(t => t.phrase).join(", "));
+    if (!quiet) {
+      this.log("debug", "Looking for triggers:", sortedTriggers.map(t => t.phrase).join(", "));
+    }
 
     const used = new Array(wordList.length).fill(false);
 
@@ -1644,7 +1667,9 @@ const VoiceAnnotator = {
             phrase: trigger.phrase,
             color: trigger.color || this.colors.yellow
           });
-          this.log("debug", `Found trigger '${trigger.phrase}' at word ${i}`);
+          if (!quiet) {
+            this.log("debug", `Found trigger '${trigger.phrase}' at word ${i}`);
+          }
           // Skip past this trigger; do not check other triggers at same start position
           i = endIndex - 1;
           break;
@@ -1652,7 +1677,9 @@ const VoiceAnnotator = {
       }
     }
 
-    this.log("info", `Found ${occurrences.length} trigger occurrence(s)`);
+    if (!quiet) {
+      this.log("info", `Found ${occurrences.length} trigger occurrence(s)`);
+    }
     return occurrences.sort((a, b) => a.startWordIndex - b.startWordIndex);
   },
 
