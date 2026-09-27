@@ -408,8 +408,7 @@ def stream(args):
     sample_rate = 16000
     flush_interval = max(0.5, float(args.flush_interval or 2))
     min_chunk = max(0.25, float(args.min_chunk or 0.5))
-    overlap_seconds = 1.5   # re-transcribe this much prior audio for context
-    max_buffer_seconds = 12.0
+    window_seconds = 15.0   # rolling transcription window (context for accuracy)
 
     # If a stale stop file exists from a previous run, clear it so we don't
     # exit immediately.
@@ -423,15 +422,16 @@ def stream(args):
     buffer_start = 0                          # absolute sample index of buffer[0]
     abs_total = 0                             # samples recorded (monotonic)
     abs_flushed = 0                           # samples already emitted (monotonic)
-    last_word = None                          # (normalized, end) of last emitted word, for dedup
+    last_word = None                          # (normalized, end) of last emitted word
 
     def do_flush(force=False):
         nonlocal buffer, buffer_start, abs_total, abs_flushed, last_word
         if abs_total - abs_flushed < min_chunk * sample_rate and not force:
             return
-        # Transcribe from a short overlap before the last flush point so the
-        # model has context for words that straddle the chunk boundary.
-        t_start = max(buffer_start, abs_flushed - int(overlap_seconds * sample_rate))
+        # Transcribe the whole rolling window so the model has plenty of
+        # context (short 2s chunks lose too many words); emit only words
+        # newer than the last flush point.
+        t_start = max(buffer_start, abs_total - int(window_seconds * sample_rate))
         audio = buffer[t_start - buffer_start:]
         if audio.size == 0:
             return
@@ -441,7 +441,7 @@ def stream(args):
                 audio,
                 beam_size=5,
                 word_timestamps=True,
-                condition_on_previous_text=True,
+                condition_on_previous_text=False,
                 vad_filter=True,
             )
         except Exception as e:
@@ -465,7 +465,7 @@ def stream(args):
                 wstart = float(start) + offset
                 wend = float(end) + offset
                 if wstart < emit_from:
-                    continue  # already emitted in a previous flush (overlap)
+                    continue  # already emitted in a previous flush
                 # Skip near-duplicate re-recognitions of the previous word
                 if last_word and last_word[0] == norm and wstart - last_word[1] < 0.3:
                     continue
@@ -479,8 +479,8 @@ def stream(args):
         if words:
             emit({"type": "words", "offset": round(offset, 3), "words": words})
         abs_flushed = abs_total
-        # Trim the buffer to bound memory: keep only the last max_buffer_seconds
-        keep_from = max(buffer_start, abs_total - int(max_buffer_seconds * sample_rate))
+        # Trim the buffer to the window to bound memory usage
+        keep_from = max(buffer_start, abs_total - int(window_seconds * sample_rate))
         if keep_from > buffer_start:
             buffer = buffer[keep_from - buffer_start:]
             buffer_start = keep_from

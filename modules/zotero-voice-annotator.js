@@ -1024,13 +1024,14 @@ const VoiceAnnotator = {
     await Zotero.File.putContentsAsync(Zotero.File.pathToFile(this.getMicHelperCommandPath()), argv.join("\n"));
     this.log("info", "Starting live capture (helper app):", argv.join(" "));
 
-    // Launch the helper bundle via LaunchServices. Spawning the `open` CLI
-    // through nsIProcess fails ("Process failed to start") because `open`
-    // refuses to run from a detached/hidden process; nsIFile.launch() is the
-    // native API Firefox uses to open apps and works in this context.
-    const appFile = Zotero.File.pathToFile(appPath);
-    appFile.launch();
-    this.live.processPromise = Promise.resolve();
+    // Launch the helper bundle via LaunchServices. Spawning /usr/bin/open
+    // directly through nsIProcess fails ("Process failed to start"), but
+    // running it through /bin/sh works and is asynchronous, so Zotero's UI
+    // never blocks while the helper starts up.
+    const cmd = "/usr/bin/open " + this.escapeShellArg(appPath) + " >/dev/null 2>&1";
+    this.log("info", "Launching mic helper:", cmd);
+    this.live.processPromise = this.runCommandAsync("/bin/sh", ["-c", cmd]);
+    this.live.processPromise.catch(e => this.log("warn", "helper launch:", e.message));
   },
 
   alertLiveError(msg) {
