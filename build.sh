@@ -4,9 +4,9 @@ set -e
 cd "$(dirname "$0")"
 
 VERSION=$(grep '"version"' manifest.json | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
-OUTPUT="marginal-voice-${VERSION}.xpi"
+OUTPUT="zotero-voice-annotator-${VERSION}.xpi"
 
-echo "Building Marginal Voice ${VERSION}..."
+echo "Building Zotero Voice Annotator ${VERSION}..."
 
 rm -f "${OUTPUT}"
 

@@ -1,10 +1,10 @@
 /**
- * Marginal Voice for Zotero
+ * Zotero Voice Annotator for Zotero
  * Transcribes audio files and creates PDF highlight annotations from spoken quotes.
  */
 
-const MarginalVoice = {
-  id: "marginal-voice@alexanderjfink.github.io",
+const VoiceAnnotator = {
+  id: "zotero-voice-annotator@alexanderjfink.github.io",
   rootURI: null,
   menuItems: [],
 
@@ -50,7 +50,7 @@ const MarginalVoice = {
 
   getTriggers() {
     try {
-      const raw = Zotero.Prefs.get("extensions.marginalvoice.triggers", true);
+      const raw = Zotero.Prefs.get("extensions.zotero-voice-annotator.triggers", true);
       if (!raw) {
         this.log("debug", "No triggers pref set; using defaults");
         return this.defaultTriggers;
@@ -70,7 +70,7 @@ const MarginalVoice = {
 
   getSilenceTimeout() {
     try {
-      const val = Zotero.Prefs.get("extensions.marginalvoice.silenceTimeout", true);
+      const val = Zotero.Prefs.get("extensions.zotero-voice-annotator.silenceTimeout", true);
       const num = Number(val);
       return Number.isFinite(num) && num > 0 ? num : 5;
     } catch (e) {
@@ -94,16 +94,19 @@ const MarginalVoice = {
   },
 
   log(level, ...args) {
-    const logLevel = Zotero.Prefs.get("extensions.marginalvoice.logLevel", true) || "info";
+    const logLevel = Zotero.Prefs.get("extensions.zotero-voice-annotator.logLevel", true) || "info";
     const levels = { debug: 0, info: 1, warn: 2, error: 3 };
     if (levels[level] >= levels[logLevel]) {
-      Zotero.debug(`[MarginalVoice] ${level.toUpperCase()}: ${args.map(a => this.formatLogArg(a)).join(" ")}`);
+      Zotero.debug(`[ZoteroVoiceAnnotator] ${level.toUpperCase()}: ${args.map(a => this.formatLogArg(a)).join(" ")}`);
     }
   },
 
   async init({ id, version, rootURI }) {
     this.rootURI = rootURI;
-    this.log("info", "Initializing Marginal Voice plugin");
+    this.log("info", "Initializing Zotero Voice Annotator plugin");
+
+    // Migrate preferences saved under the old extensions.marginalvoice prefix
+    await this.migrateLegacyPrefs();
 
     // Extract bundled helper script to a temp file so Python can execute it
     await this.extractHelperScript();
@@ -113,7 +116,7 @@ const MarginalVoice = {
       try {
         Zotero.PreferencePanes.register({
           pluginID: this.id,
-          label: "Marginal Voice",
+          label: "Zotero Voice Annotator",
           src: this.rootURI + "chrome/content/preferences.xhtml",
           scripts: [this.rootURI + "chrome/content/preferences.js"],
           image: this.rootURI + "skin/icon-48.png"
@@ -129,6 +132,79 @@ const MarginalVoice = {
     // PDF reader integration (live voice annotation)
     this.live.queue = Promise.resolve();
     this.registerReaderIntegration();
+  },
+
+  // One-time migration of preferences saved under the old
+  // "extensions.marginalvoice." prefix when the plugin was renamed.
+  legacyDefault(key) {
+    const defaults = {
+      transcriptionMode: "python",
+      pythonPath: "",
+      helperScriptPath: "",
+      customCommandPath: "",
+      customCommandArgs: "",
+      whisperModel: "base",
+      fuzzyThreshold: "0.6",
+      silenceTimeout: 5,
+      skipDuplicates: true,
+      logLevel: "info",
+      liveMode: "toggle",
+      liveShortcut: "CmdOrCtrl+Shift+V",
+      liveShowOverlay: true,
+      liveFlushInterval: 2,
+      liveOverlayPos: "",
+      triggers: JSON.stringify(this.defaultTriggers)
+    };
+    return defaults[key];
+  },
+
+  async migrateLegacyPrefs() {
+    const NEW = "extensions.zotero-voice-annotator.";
+    const OLD = "extensions.marginalvoice.";
+    const flag = NEW + "legacyMigrated";
+    try {
+      if (Zotero.Prefs.get(flag, true)) return;
+    } catch (e) {
+      return;
+    }
+    const keys = [
+      "transcriptionMode", "pythonPath", "helperScriptPath", "customCommandPath",
+      "customCommandArgs", "whisperModel", "fuzzyThreshold", "silenceTimeout",
+      "skipDuplicates", "logLevel", "liveMode", "liveShortcut", "liveShowOverlay",
+      "liveFlushInterval", "liveOverlayPos", "triggers"
+    ];
+    let migrated = 0;
+    for (const key of keys) {
+      let oldVal;
+      try {
+        oldVal = Zotero.Prefs.get(OLD + key, true);
+      } catch (e) {
+        continue;
+      }
+      if (oldVal === undefined || oldVal === null || oldVal === "") continue;
+      let newVal;
+      try {
+        newVal = Zotero.Prefs.get(NEW + key, true);
+      } catch (e) {
+        newVal = undefined;
+      }
+      // Only copy if the new pref is still at its default (user hasn't
+      // customized it yet).
+      if (newVal === this.legacyDefault(key)) {
+        try {
+          Zotero.Prefs.set(NEW + key, oldVal, true);
+          migrated++;
+        } catch (e) {
+          this.log("debug", "migrateLegacyPrefs set failed for", key, e.message);
+        }
+      }
+    }
+    try {
+      Zotero.Prefs.set(flag, true, true);
+    } catch (e) {}
+    if (migrated > 0) {
+      this.log("info", `Migrated ${migrated} preference(s) from extensions.marginalvoice`);
+    }
   },
 
   async extractHelperScript() {
@@ -184,7 +260,7 @@ const MarginalVoice = {
   },
 
   shutdown() {
-    this.log("info", "Shutting down Marginal Voice plugin");
+    this.log("info", "Shutting down Zotero Voice Annotator plugin");
     this.unregisterMenus();
     // Stop any active live capture and remove reader UI
     if (this.live.active || this.live.capturing) {
@@ -192,7 +268,7 @@ const MarginalVoice = {
     }
     for (const doc of this.live.overlayDocs) {
       try {
-        const el = doc.getElementById("marginalvoice-overlay");
+        const el = doc.getElementById("zva-overlay");
         if (el && el.parentNode) el.parentNode.removeChild(el);
       } catch (e) {}
     }
@@ -213,8 +289,8 @@ const MarginalVoice = {
     const itemMenu = doc.getElementById("zotero-itemmenu");
     if (!itemMenu) return;
 
-    // Idempotent: remove any existing Marginal Voice menu items first
-    const existingIds = ["marginalvoice-separator", "marginalvoice-annotate-one", "marginalvoice-annotate-all"];
+    // Idempotent: remove any existing Zotero Voice Annotator menu items first
+    const existingIds = ["zva-separator", "zva-annotate-one", "zva-annotate-all"];
     for (const id of existingIds) {
       const existing = doc.getElementById(id);
       if (existing && existing.parentNode) {
@@ -224,22 +300,22 @@ const MarginalVoice = {
 
     // Separator
     const sep = doc.createXULElement("menuseparator");
-    sep.id = "marginalvoice-separator";
+    sep.id = "zva-separator";
     itemMenu.appendChild(sep);
     this.menuItems.push(sep);
 
     // Single-item action: right-click on an audio attachment
     const annotateOne = doc.createXULElement("menuitem");
-    annotateOne.id = "marginalvoice-annotate-one";
-    annotateOne.setAttribute("label", "Marginal Voice: Transcribe and Annotate");
+    annotateOne.id = "zva-annotate-one";
+    annotateOne.setAttribute("label", "Zotero Voice Annotator: Transcribe and Annotate");
     annotateOne.addEventListener("command", () => this.handleTranscribeCommand(window, false));
     itemMenu.appendChild(annotateOne);
     this.menuItems.push(annotateOne);
 
     // Bulk action: right-click on a source (or selection with multiple audio attachments)
     const annotateAll = doc.createXULElement("menuitem");
-    annotateAll.id = "marginalvoice-annotate-all";
-    annotateAll.setAttribute("label", "Marginal Voice: Transcribe and Annotate All");
+    annotateAll.id = "zva-annotate-all";
+    annotateAll.setAttribute("label", "Zotero Voice Annotator: Transcribe and Annotate All");
     annotateAll.addEventListener("command", () => this.handleTranscribeCommand(window, true));
     itemMenu.appendChild(annotateAll);
     this.menuItems.push(annotateAll);
@@ -268,7 +344,7 @@ const MarginalVoice = {
 
   unregisterMenus() {
     // Remove menu elements from all windows by ID
-    const ids = ["marginalvoice-separator", "marginalvoice-annotate-one", "marginalvoice-annotate-all"];
+    const ids = ["zva-separator", "zva-annotate-one", "zva-annotate-all"];
     for (const win of Zotero.getMainWindows()) {
       const doc = win.document;
       for (const id of ids) {
@@ -310,11 +386,11 @@ const MarginalVoice = {
   },
 
   createToolbarButton(reader, doc) {
-    if (doc.getElementById("marginalvoice-toggle-button")) return null;
+    if (doc.getElementById("zva-toggle-button")) return null;
     const button = doc.createElement("button");
-    button.id = "marginalvoice-toggle-button";
+    button.id = "zva-toggle-button";
     button.className = "toolbar-button";
-    button.title = "Marginal Voice: Live Voice Annotation";
+    button.title = "Zotero Voice Annotator: Live Voice Annotation";
     button.textContent = "🎙";
     button.style.fontSize = "13px";
     button.style.cursor = "pointer";
@@ -329,8 +405,8 @@ const MarginalVoice = {
 
   createLiveOverlay(reader, doc) {
     if (!doc || !doc.body) return null;
-    if (Zotero.Prefs.get("extensions.marginalvoice.liveShowOverlay", true) === false) return null;
-    const existing = doc.getElementById("marginalvoice-overlay");
+    if (Zotero.Prefs.get("extensions.zotero-voice-annotator.liveShowOverlay", true) === false) return null;
+    const existing = doc.getElementById("zva-overlay");
     if (existing) {
       existing.style.display = "";
       this.renderOverlayTriggers(existing, doc);
@@ -339,7 +415,7 @@ const MarginalVoice = {
     }
 
     const overlay = doc.createElement("div");
-    overlay.id = "marginalvoice-overlay";
+    overlay.id = "zva-overlay";
     overlay.style.cssText =
       "position: fixed; z-index: 99999; width: 220px; background: rgba(255,255,255,0.96);" +
       "border: 1px solid #bbb; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);" +
@@ -347,13 +423,13 @@ const MarginalVoice = {
       "user-select: none; -moz-window-dragging: no-drag;";
 
     const header = doc.createElement("div");
-    header.id = "marginalvoice-overlay-header";
+    header.id = "zva-overlay-header";
     header.style.cssText =
       "display: flex; align-items: center; justify-content: space-between; padding: 5px 8px;" +
       "background: #2c3e50; color: #fff; border-radius: 5px 5px 0 0; cursor: move; font-weight: 600;" +
       "-moz-window-dragging: no-drag;";
     const title = doc.createElement("span");
-    title.textContent = "Marginal Voice";
+    title.textContent = "Zotero Voice Annotator";
     const minimize = doc.createElement("button");
     minimize.textContent = "–";
     minimize.title = "Minimize";
@@ -363,12 +439,12 @@ const MarginalVoice = {
     header.appendChild(minimize);
 
     const status = doc.createElement("div");
-    status.id = "marginalvoice-overlay-status";
+    status.id = "zva-overlay-status";
     status.style.cssText = "padding: 4px 8px; font-weight: 600; border-bottom: 1px solid #eee;";
     status.textContent = "Listening…";
 
     const list = doc.createElement("div");
-    list.id = "marginalvoice-overlay-triggers";
+    list.id = "zva-overlay-triggers";
     list.style.cssText = "padding: 6px 8px; max-height: 180px; overflow-y: auto;";
 
     overlay.appendChild(header);
@@ -418,7 +494,7 @@ const MarginalVoice = {
 
   getOverlayPos() {
     try {
-      const raw = Zotero.Prefs.get("extensions.marginalvoice.liveOverlayPos", true);
+      const raw = Zotero.Prefs.get("extensions.zotero-voice-annotator.liveOverlayPos", true);
       if (!raw) return null;
       const pos = JSON.parse(raw);
       return (pos && typeof pos.x === "number" && typeof pos.y === "number") ? pos : null;
@@ -429,7 +505,7 @@ const MarginalVoice = {
 
   setOverlayPos(pos) {
     try {
-      Zotero.Prefs.set("extensions.marginalvoice.liveOverlayPos", JSON.stringify(pos), true);
+      Zotero.Prefs.set("extensions.zotero-voice-annotator.liveOverlayPos", JSON.stringify(pos), true);
     } catch (e) {
       this.log("debug", "setOverlayPos:", e.message);
     }
@@ -481,7 +557,7 @@ const MarginalVoice = {
   },
 
   renderOverlayTriggers(overlay, doc) {
-    const list = overlay.querySelector("#marginalvoice-overlay-triggers");
+    const list = overlay.querySelector("#zva-overlay-triggers");
     if (!list) return;
     list.textContent = "";
     const triggers = this.getTriggers();
@@ -499,8 +575,8 @@ const MarginalVoice = {
   },
 
   updateLiveOverlayStatus(doc, status) {
-    const overlay = doc && doc.getElementById("marginalvoice-overlay");
-    const el = overlay && overlay.querySelector("#marginalvoice-overlay-status");
+    const overlay = doc && doc.getElementById("zva-overlay");
+    const el = overlay && overlay.querySelector("#zva-overlay-status");
     if (!el) return;
     const map = {
       idle: ["Idle", "#888"],
@@ -555,11 +631,11 @@ const MarginalVoice = {
   },
 
   getLiveMode() {
-    return Zotero.Prefs.get("extensions.marginalvoice.liveMode", true) || "toggle";
+    return Zotero.Prefs.get("extensions.zotero-voice-annotator.liveMode", true) || "toggle";
   },
 
   getLiveShortcut() {
-    return Zotero.Prefs.get("extensions.marginalvoice.liveShortcut", true) || "CmdOrCtrl+Shift+V";
+    return Zotero.Prefs.get("extensions.zotero-voice-annotator.liveShortcut", true) || "CmdOrCtrl+Shift+V";
   },
 
   parseShortcut(str) {
@@ -613,7 +689,7 @@ const MarginalVoice = {
   async enterLive(reader) {
     if (!reader || !reader.itemID) {
       const win = Zotero.getMainWindows()[0];
-      Zotero.alert(win, "Marginal Voice", "Open a PDF in the reader to start live annotation.");
+      Zotero.alert(win, "Zotero Voice Annotator", "Open a PDF in the reader to start live annotation.");
       return;
     }
     if (this.live.active) return;
@@ -664,14 +740,14 @@ const MarginalVoice = {
     if (this.live.capturing) return;
     const pythonPath = this.getPythonPath();
     const helperPath = this.getHelperScriptPath();
-    const model = Zotero.Prefs.get("extensions.marginalvoice.whisperModel", true) || "base";
-    const flushInterval = Number(Zotero.Prefs.get("extensions.marginalvoice.liveFlushInterval", true)) || 2;
+    const model = Zotero.Prefs.get("extensions.zotero-voice-annotator.whisperModel", true) || "base";
+    const flushInterval = Number(Zotero.Prefs.get("extensions.zotero-voice-annotator.liveFlushInterval", true)) || 2;
 
     const tmpDir = Zotero.getTempDirectory();
     const outFile = tmpDir.clone();
-    outFile.append("marginalvoice_stream_" + Zotero.Utilities.randomString(8) + ".jsonl");
+    outFile.append("zva_stream_" + Zotero.Utilities.randomString(8) + ".jsonl");
     const stopFile = tmpDir.clone();
-    stopFile.append("marginalvoice_stop_" + Zotero.Utilities.randomString(8) + ".txt");
+    stopFile.append("zva_stop_" + Zotero.Utilities.randomString(8) + ".txt");
 
     this.live.streamOutPath = outFile.path;
     this.live.stopFilePath = stopFile.path;
@@ -749,7 +825,7 @@ const MarginalVoice = {
     // Remove the overlay when live mode ends
     if (doc) {
       try {
-        const overlay = doc.getElementById("marginalvoice-overlay");
+        const overlay = doc.getElementById("zva-overlay");
         if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
       } catch (e) {}
       const idx = this.live.overlayDocs.indexOf(doc);
@@ -990,7 +1066,7 @@ const MarginalVoice = {
       ? (await this.matchQuoteInPDF(pdfPath, quoteCandidate)) || match
       : match;
 
-    const appendToExisting = Zotero.Prefs.get("extensions.marginalvoice.skipDuplicates", true) !== false;
+    const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
     const existingAnnotation = appendToExisting ? await this.findExistingAnnotation(pdfItem, finalMatch.sentence, finalMatch) : null;
     if (existingAnnotation) {
       await this.appendCommentaryToAnnotation(existingAnnotation, commentary);
@@ -1008,8 +1084,8 @@ const MarginalVoice = {
         if (!isThisReader) continue;
       }
       tb.button.title = active
-        ? "Marginal Voice: Stop Live Annotation"
-        : "Marginal Voice: Live Voice Annotation";
+        ? "Zotero Voice Annotator: Stop Live Annotation"
+        : "Zotero Voice Annotator: Live Voice Annotation";
       tb.button.style.background = active ? "#2ecc71" : "";
     }
   },
@@ -1110,7 +1186,7 @@ const MarginalVoice = {
     this.log("info", `Processing ${toProcess.length} audio file(s) (processAll=${processAll})`);
 
     const progress = new Zotero.ProgressWindow({ window });
-    progress.changeHeadline("Marginal Voice");
+    progress.changeHeadline("Zotero Voice Annotator");
     progress.show();
 
     let processed = 0;
@@ -1172,7 +1248,7 @@ const MarginalVoice = {
     this.log("info", `Found ${segments.length} valid quote segments`);
 
     // Process each segment
-    const appendToExisting = Zotero.Prefs.get("extensions.marginalvoice.skipDuplicates", true) !== false;
+    const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
 
     let createdCount = 0;
     let appendedCount = 0;
@@ -1229,7 +1305,7 @@ const MarginalVoice = {
   },
 
   async transcribeAudio(audioPath) {
-    const mode = Zotero.Prefs.get("extensions.marginalvoice.transcriptionMode", true) || "python";
+    const mode = Zotero.Prefs.get("extensions.zotero-voice-annotator.transcriptionMode", true) || "python";
 
     if (mode === "custom") {
       return this.transcribeWithCustomCommand(audioPath);
@@ -1240,10 +1316,10 @@ const MarginalVoice = {
   async transcribeWithPython(audioPath) {
     const pythonPath = this.getPythonPath();
     const helperPath = this.getHelperScriptPath();
-    const model = Zotero.Prefs.get("extensions.marginalvoice.whisperModel", true) || "base";
+    const model = Zotero.Prefs.get("extensions.zotero-voice-annotator.whisperModel", true) || "base";
 
     const tmpFile = Zotero.getTempDirectory();
-    tmpFile.append("marginalvoice_transcript.json");
+    tmpFile.append("zva_transcript.json");
     tmpFile.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o666);
 
     const args = [helperPath, "transcribe", "--audio", audioPath, "--model", model, "--output", tmpFile.path];
@@ -1269,14 +1345,14 @@ const MarginalVoice = {
   },
 
   async transcribeWithCustomCommand(audioPath) {
-    const cmdPath = Zotero.Prefs.get("extensions.marginalvoice.customCommandPath", true);
+    const cmdPath = Zotero.Prefs.get("extensions.zotero-voice-annotator.customCommandPath", true);
     if (!cmdPath) throw new Error("Custom command path not configured.");
 
     const tmpFile = Zotero.getTempDirectory();
-    tmpFile.append("marginalvoice_transcript.json");
+    tmpFile.append("zva_transcript.json");
     tmpFile.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o666);
 
-    const argsStr = Zotero.Prefs.get("extensions.marginalvoice.customCommandArgs", true) || "";
+    const argsStr = Zotero.Prefs.get("extensions.zotero-voice-annotator.customCommandArgs", true) || "";
     const args = argsStr.split(/\s+/).filter(Boolean).map(arg => arg.replace(/\{audio\}/g, audioPath));
     // If custom command doesn't support --output, we wrap it
     // For now, assume custom commands write to stdout and we capture via temp file
@@ -1398,7 +1474,7 @@ const MarginalVoice = {
   },
 
   getPythonPath() {
-    const configured = Zotero.Prefs.get("extensions.marginalvoice.pythonPath", true);
+    const configured = Zotero.Prefs.get("extensions.zotero-voice-annotator.pythonPath", true);
     if (configured) return configured;
     // Try common paths
     const candidates = ["/usr/bin/python3", "/usr/local/bin/python3", "python3", "python"];
@@ -1406,7 +1482,7 @@ const MarginalVoice = {
   },
 
   getHelperScriptPath() {
-    const configured = Zotero.Prefs.get("extensions.marginalvoice.helperScriptPath", true);
+    const configured = Zotero.Prefs.get("extensions.zotero-voice-annotator.helperScriptPath", true);
     if (configured) return configured;
     if (!this.helperScriptTempPath) {
       throw new Error("Helper script has not been extracted. Please restart Zotero.");
@@ -1731,7 +1807,7 @@ const MarginalVoice = {
     const helperPath = this.getHelperScriptPath();
 
     const tmpFile = Zotero.getTempDirectory();
-    tmpFile.append("marginalvoice_match.json");
+    tmpFile.append("zva_match.json");
     tmpFile.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o666);
 
     const args = [helperPath, "match", "--pdf", pdfPath, "--quote", quoteCandidate, "--output", tmpFile.path];
@@ -1769,7 +1845,7 @@ const MarginalVoice = {
     const helperPath = this.getHelperScriptPath();
 
     const tmpFile = Zotero.getTempDirectory();
-    tmpFile.append("marginalvoice_locate.json");
+    tmpFile.append("zva_locate.json");
     tmpFile.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o666);
 
     const args = [helperPath, "locate", "--pdf", pdfPath, "--text", text, "--output", tmpFile.path];
@@ -1955,4 +2031,4 @@ const MarginalVoice = {
   }
 };
 
-Zotero.MarginalVoice = MarginalVoice;
+Zotero.VoiceAnnotator = VoiceAnnotator;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Zotero Marginal Voice Helper Script
+Zotero Zotero Voice Annotator Helper Script
 Handles audio transcription and PDF text location.
 
 Dependencies:
@@ -502,7 +502,7 @@ def stream(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Zotero Marginal Voice Helper")
+    parser = argparse.ArgumentParser(description="Zotero Zotero Voice Annotator Helper")
     subparsers = parser.add_subparsers(dest="command")
 
     # Transcribe subcommand

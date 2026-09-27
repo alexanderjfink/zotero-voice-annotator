@@ -1,31 +1,31 @@
 <!--
-  Marginal Voice Preferences Pane
+  Zotero Voice Annotator Preferences Pane
   Loaded via Zotero.PreferencePanes.register({ scripts: [...] }).
-  preferences.js exposes window.MVPrefs for XUL oncommand handlers.
+  preferences.js exposes window.ZVAPrefs for XUL oncommand handlers.
 -->
 <vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
       xmlns:html="http://www.w3.org/1999/xhtml"
-      id="marginalvoice-preferences"
+      id="zva-preferences"
       style="padding: 16px; min-width: 500px;">
 
   <html:style>
-    #marginalvoice-preferences .mv-row {
+    #zva-preferences .mv-row {
       margin: 8px 0;
       align-items: center;
     }
-    #marginalvoice-preferences html|label {
+    #zva-preferences html|label {
       display: inline-block;
       width: 220px;
       font-weight: 600;
     }
-    #marginalvoice-preferences html|input[type="text"],
-    #marginalvoice-preferences html|input[type="number"] {
+    #zva-preferences html|input[type="text"],
+    #zva-preferences html|input[type="number"] {
       padding: 4px 6px;
       border: 1px solid #999;
       border-radius: 3px;
       font-size: 0.95em;
     }
-    #marginalvoice-preferences .mv-trigger-row {
+    #zva-preferences .mv-trigger-row {
       margin: 4px 0;
       align-items: center;
     }
@@ -35,8 +35,8 @@
     <label value="Transcription" style="font-weight: bold;" />
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-transcriptionMode">Mode:</html:label>
-      <menulist id="marginalvoice-transcriptionMode" oncommand="MVPrefs.saveAllPrefs()">
+      <html:label for="zva-transcriptionMode">Mode:</html:label>
+      <menulist id="zva-transcriptionMode" oncommand="ZVAPrefs.saveAllPrefs()">
         <menupopup>
           <menuitem value="python" label="Python Script (faster-whisper)" />
           <menuitem value="custom" label="Custom Command" />
@@ -45,28 +45,28 @@
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-pythonPath">Python Path (optional):</html:label>
-      <html:input type="text" id="marginalvoice-pythonPath" style="width: 300px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-pythonPath">Python Path (optional):</html:label>
+      <html:input type="text" id="zva-pythonPath" style="width: 300px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-helperScriptPath">Helper Script Path (optional):</html:label>
-      <html:input type="text" id="marginalvoice-helperScriptPath" style="width: 300px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-helperScriptPath">Helper Script Path (optional):</html:label>
+      <html:input type="text" id="zva-helperScriptPath" style="width: 300px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-customCommandPath">Custom Command Path:</html:label>
-      <html:input type="text" id="marginalvoice-customCommandPath" style="width: 300px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-customCommandPath">Custom Command Path:</html:label>
+      <html:input type="text" id="zva-customCommandPath" style="width: 300px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-customCommandArgs">Custom Command Args (use {audio}):</html:label>
-      <html:input type="text" id="marginalvoice-customCommandArgs" style="width: 300px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-customCommandArgs">Custom Command Args (use {audio}):</html:label>
+      <html:input type="text" id="zva-customCommandArgs" style="width: 300px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-whisperModel">Whisper Model:</html:label>
-      <html:input type="text" id="marginalvoice-whisperModel" style="width: 120px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-whisperModel">Whisper Model:</html:label>
+      <html:input type="text" id="zva-whisperModel" style="width: 120px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
   </groupbox>
 
@@ -77,12 +77,12 @@
       Say a trigger phrase followed by the text you want highlighted.
     </description>
 
-    <vbox id="marginalvoice-triggers-list" style="margin: 8px 0;">
+    <vbox id="zva-triggers-list" style="margin: 8px 0;">
     </vbox>
 
     <hbox style="margin-top: 8px;">
-      <button label="+ Add Trigger" oncommand="MVPrefs.addTriggerRow()" />
-      <button label="Reset Defaults" oncommand="MVPrefs.resetDefaults()" style="margin-left: 8px;" />
+      <button label="+ Add Trigger" oncommand="ZVAPrefs.addTriggerRow()" />
+      <button label="Reset Defaults" oncommand="ZVAPrefs.resetDefaults()" style="margin-left: 8px;" />
     </hbox>
   </groupbox>
 
@@ -90,13 +90,13 @@
     <label value="Annotation Behavior" style="font-weight: bold;" />
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-silenceTimeout">Silence Timeout (seconds):</html:label>
-      <html:input type="number" id="marginalvoice-silenceTimeout" min="1" max="60" style="width: 80px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-silenceTimeout">Silence Timeout (seconds):</html:label>
+      <html:input type="number" id="zva-silenceTimeout" min="1" max="60" style="width: 80px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-logLevel">Log Level:</html:label>
-      <menulist id="marginalvoice-logLevel" oncommand="MVPrefs.saveAllPrefs()">
+      <html:label for="zva-logLevel">Log Level:</html:label>
+      <menulist id="zva-logLevel" oncommand="ZVAPrefs.saveAllPrefs()">
         <menupopup>
           <menuitem value="debug" label="Debug" />
           <menuitem value="info" label="Info" />
@@ -107,7 +107,7 @@
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <checkbox id="marginalvoice-skipDuplicates" label="Append commentary to existing highlights" oncommand="MVPrefs.saveAllPrefs()" />
+      <checkbox id="zva-skipDuplicates" label="Append commentary to existing highlights" oncommand="ZVAPrefs.saveAllPrefs()" />
     </hbox>
   </groupbox>
 
@@ -120,8 +120,8 @@
     </description>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-liveMode">Recording Mode:</html:label>
-      <menulist id="marginalvoice-liveMode" oncommand="MVPrefs.saveAllPrefs()">
+      <html:label for="zva-liveMode">Recording Mode:</html:label>
+      <menulist id="zva-liveMode" oncommand="ZVAPrefs.saveAllPrefs()">
         <menupopup>
           <menuitem value="toggle" label="Toggle (press to start/stop)" />
           <menuitem value="push" label="Push-to-talk (hold to record)" />
@@ -131,19 +131,19 @@
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-liveShortcut">Keyboard Shortcut:</html:label>
-      <html:input type="text" id="marginalvoice-liveShortcut" readonly="readonly"
+      <html:label for="zva-liveShortcut">Keyboard Shortcut:</html:label>
+      <html:input type="text" id="zva-liveShortcut" readonly="readonly"
                   style="width: 180px; background: #f4f4f4;"
                   placeholder="Click, then press keys" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <html:label for="marginalvoice-liveFlushInterval">Live Transcription Interval (sec):</html:label>
-      <html:input type="number" id="marginalvoice-liveFlushInterval" min="1" max="10" style="width: 80px;" onchange="MVPrefs.saveAllPrefs()" />
+      <html:label for="zva-liveFlushInterval">Live Transcription Interval (sec):</html:label>
+      <html:input type="number" id="zva-liveFlushInterval" min="1" max="10" style="width: 80px;" onchange="ZVAPrefs.saveAllPrefs()" />
     </hbox>
 
     <hbox class="mv-row" align="center">
-      <checkbox id="marginalvoice-liveShowOverlay" label="Show trigger word overlay in PDF reader" oncommand="MVPrefs.saveAllPrefs()" />
+      <checkbox id="zva-liveShowOverlay" label="Show trigger word overlay in PDF reader" oncommand="ZVAPrefs.saveAllPrefs()" />
     </hbox>
   </groupbox>
 

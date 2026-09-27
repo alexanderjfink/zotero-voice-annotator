@@ -1,4 +1,4 @@
-// Bootstrap entry point for Marginal Voice plugin
+// Bootstrap entry point for Zotero Voice Annotator plugin
 
 var chromeHandle = null;
 
@@ -11,14 +11,14 @@ async function startup({ id, version, resourceURI, rootURI }) {
       .getService(Components.interfaces.amIAddonManagerStartup);
     const manifestURI = Services.io.newURI(rootURI + "manifest.json");
     chromeHandle = aomStartup.registerChrome(manifestURI, [
-      ["content", "marginalvoice", "chrome/content/"]
+      ["content", "zva", "chrome/content/"]
     ]);
   } catch (e) {
-    Zotero.debug("[MarginalVoice] Chrome registration failed: " + e.message);
+    Zotero.debug("[ZoteroVoiceAnnotator] Chrome registration failed: " + e.message);
   }
 
   // Load main module into a scope with required globals
-  const scriptURI = rootURI + "modules/marginal-voice.js";
+  const scriptURI = rootURI + "modules/zotero-voice-annotator.js";
   Services.scriptloader.loadSubScript(scriptURI, {
     Zotero,
     Components,
@@ -27,14 +27,14 @@ async function startup({ id, version, resourceURI, rootURI }) {
   });
 
   // Initialize plugin
-  if (typeof Zotero.MarginalVoice !== "undefined") {
-    await Zotero.MarginalVoice.init({ id, version, rootURI });
+  if (typeof Zotero.VoiceAnnotator !== "undefined") {
+    await Zotero.VoiceAnnotator.init({ id, version, rootURI });
   }
 
   // Register window hooks for existing windows
   Zotero.getMainWindows().forEach((win) => {
-    if (typeof Zotero.MarginalVoice !== "undefined") {
-      Zotero.MarginalVoice.onMainWindowLoad({ window: win });
+    if (typeof Zotero.VoiceAnnotator !== "undefined") {
+      Zotero.VoiceAnnotator.onMainWindowLoad({ window: win });
     }
   });
 
@@ -43,15 +43,15 @@ async function startup({ id, version, resourceURI, rootURI }) {
     onOpenWindow: (xulWin) => {
       const domWin = xulWin.docShell.domWindow;
       domWin.addEventListener("load", () => {
-        if (typeof Zotero.MarginalVoice !== "undefined" && domWin.location?.href?.includes("zoteroPane.xhtml")) {
-          Zotero.MarginalVoice.onMainWindowLoad({ window: domWin });
+        if (typeof Zotero.VoiceAnnotator !== "undefined" && domWin.location?.href?.includes("zoteroPane.xhtml")) {
+          Zotero.VoiceAnnotator.onMainWindowLoad({ window: domWin });
         }
       }, { once: true });
     },
     onCloseWindow: (xulWin) => {
       const domWin = xulWin.docShell.domWindow;
-      if (typeof Zotero.MarginalVoice !== "undefined" && domWin.location?.href?.includes("zoteroPane.xhtml")) {
-        Zotero.MarginalVoice.onMainWindowUnload({ window: domWin });
+      if (typeof Zotero.VoiceAnnotator !== "undefined" && domWin.location?.href?.includes("zoteroPane.xhtml")) {
+        Zotero.VoiceAnnotator.onMainWindowUnload({ window: domWin });
       }
     },
     onWindowTitleChange: () => {}
@@ -59,8 +59,8 @@ async function startup({ id, version, resourceURI, rootURI }) {
 }
 
 function shutdown({ id, version, resourceURI, rootURI }) {
-  if (typeof Zotero.MarginalVoice !== "undefined") {
-    Zotero.MarginalVoice.shutdown();
+  if (typeof Zotero.VoiceAnnotator !== "undefined") {
+    Zotero.VoiceAnnotator.shutdown();
   }
   if (chromeHandle) {
     chromeHandle.destruct();

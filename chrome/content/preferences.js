@@ -1,18 +1,18 @@
 "use strict";
 
-// Marginal Voice Preferences Pane Script
+// Zotero Voice Annotator Preferences Pane Script
 // Loaded via PreferencePanes.register({ scripts: [...] }).
-// Public functions are exposed on window.MVPrefs for XUL oncommand handlers.
+// Public functions are exposed on window.ZVAPrefs for XUL oncommand handlers.
 
 (function () {
-  const PREF = "extensions.marginalvoice.";
+  const PREF = "extensions.zotero-voice-annotator.";
   const P  = (k, fallback) => {
     try {
       if (typeof Zotero !== "undefined" && Zotero.Prefs && Zotero.Prefs.get) {
         return Zotero.Prefs.get(PREF + k, true);
       }
     } catch (e) {
-      dump("[MarginalVoicePrefs] get failed: " + e + "\n");
+      dump("[ZoteroVoiceAnnotatorPrefs] get failed: " + e + "\n");
     }
     return fallback;
   };
@@ -22,15 +22,15 @@
         Zotero.Prefs.set(PREF + k, v, true);
       }
     } catch (e) {
-      dump("[MarginalVoicePrefs] set failed: " + e + "\n");
+      dump("[ZoteroVoiceAnnotatorPrefs] set failed: " + e + "\n");
     }
   };
 
   function mvLog(msg) {
-    dump("[MarginalVoicePrefs] " + msg + "\n");
+    dump("[ZoteroVoiceAnnotatorPrefs] " + msg + "\n");
     try {
       if (typeof Zotero !== "undefined" && Zotero.debug) {
-        Zotero.debug("[MarginalVoicePrefs] " + msg);
+        Zotero.debug("[ZoteroVoiceAnnotatorPrefs] " + msg);
       }
     } catch (_) {}
   }
@@ -118,7 +118,7 @@
   }
 
   function renderTriggers() {
-    const container = document.getElementById("marginalvoice-triggers-list");
+    const container = document.getElementById("zva-triggers-list");
     if (!container) return;
     while (container.firstChild) {
       container.removeChild(container.firstChild);
@@ -131,7 +131,7 @@
   }
 
   function collectTriggers() {
-    const container = document.getElementById("marginalvoice-triggers-list");
+    const container = document.getElementById("zva-triggers-list");
     const triggers = [];
     for (const row of container.children) {
       const input = row.querySelector("input");
@@ -145,7 +145,7 @@
   }
 
   function addTriggerRow() {
-    const container = document.getElementById("marginalvoice-triggers-list");
+    const container = document.getElementById("zva-triggers-list");
     if (!container) return;
     const row = createTriggerRow();
     container.appendChild(row);
@@ -154,7 +154,7 @@
   }
 
   function resetDefaults() {
-    const timeoutInput = document.getElementById("marginalvoice-silenceTimeout");
+    const timeoutInput = document.getElementById("zva-silenceTimeout");
     if (timeoutInput) timeoutInput.value = 5;
     saveTriggers(DEFAULT_TRIGGERS.map(t => ({ ...t })));
     renderTriggers();
@@ -185,19 +185,19 @@
   function saveAllPrefs() {
     mvLog("saveAllPrefs called");
     try {
-      SP("transcriptionMode", document.getElementById("marginalvoice-transcriptionMode").value);
-      SP("pythonPath", document.getElementById("marginalvoice-pythonPath").value);
-      SP("helperScriptPath", document.getElementById("marginalvoice-helperScriptPath").value);
-      SP("customCommandPath", document.getElementById("marginalvoice-customCommandPath").value);
-      SP("customCommandArgs", document.getElementById("marginalvoice-customCommandArgs").value);
-      SP("whisperModel", document.getElementById("marginalvoice-whisperModel").value);
-      SP("silenceTimeout", parseInt(document.getElementById("marginalvoice-silenceTimeout").value, 10) || 5);
-      SP("skipDuplicates", document.getElementById("marginalvoice-skipDuplicates").checked);
-      SP("logLevel", document.getElementById("marginalvoice-logLevel").value);
-      SP("liveMode", document.getElementById("marginalvoice-liveMode").value);
-      SP("liveShortcut", document.getElementById("marginalvoice-liveShortcut").value);
-      SP("liveFlushInterval", parseInt(document.getElementById("marginalvoice-liveFlushInterval").value, 10) || 2);
-      SP("liveShowOverlay", document.getElementById("marginalvoice-liveShowOverlay").checked);
+      SP("transcriptionMode", document.getElementById("zva-transcriptionMode").value);
+      SP("pythonPath", document.getElementById("zva-pythonPath").value);
+      SP("helperScriptPath", document.getElementById("zva-helperScriptPath").value);
+      SP("customCommandPath", document.getElementById("zva-customCommandPath").value);
+      SP("customCommandArgs", document.getElementById("zva-customCommandArgs").value);
+      SP("whisperModel", document.getElementById("zva-whisperModel").value);
+      SP("silenceTimeout", parseInt(document.getElementById("zva-silenceTimeout").value, 10) || 5);
+      SP("skipDuplicates", document.getElementById("zva-skipDuplicates").checked);
+      SP("logLevel", document.getElementById("zva-logLevel").value);
+      SP("liveMode", document.getElementById("zva-liveMode").value);
+      SP("liveShortcut", document.getElementById("zva-liveShortcut").value);
+      SP("liveFlushInterval", parseInt(document.getElementById("zva-liveFlushInterval").value, 10) || 2);
+      SP("liveShowOverlay", document.getElementById("zva-liveShowOverlay").checked);
       saveTriggers(collectTriggers());
       mvLog("saveAllPrefs done");
     } catch (e) {
@@ -208,20 +208,20 @@
   function init() {
     mvLog("init called");
     try {
-      document.getElementById("marginalvoice-transcriptionMode").value = P("transcriptionMode", "python");
-      document.getElementById("marginalvoice-pythonPath").value = P("pythonPath", "");
-      document.getElementById("marginalvoice-helperScriptPath").value = P("helperScriptPath", "");
-      document.getElementById("marginalvoice-customCommandPath").value = P("customCommandPath", "");
-      document.getElementById("marginalvoice-customCommandArgs").value = P("customCommandArgs", "");
-      document.getElementById("marginalvoice-whisperModel").value = P("whisperModel", "base");
-      document.getElementById("marginalvoice-silenceTimeout").value = P("silenceTimeout", 5);
-      document.getElementById("marginalvoice-skipDuplicates").checked = P("skipDuplicates", true);
-      document.getElementById("marginalvoice-logLevel").value = P("logLevel", "info");
-      document.getElementById("marginalvoice-liveMode").value = P("liveMode", "toggle");
-      document.getElementById("marginalvoice-liveShortcut").value = P("liveShortcut", "CmdOrCtrl+Shift+V");
-      document.getElementById("marginalvoice-liveFlushInterval").value = P("liveFlushInterval", 2);
-      document.getElementById("marginalvoice-liveShowOverlay").checked = P("liveShowOverlay", true) !== false;
-      captureShortcut(document.getElementById("marginalvoice-liveShortcut"));
+      document.getElementById("zva-transcriptionMode").value = P("transcriptionMode", "python");
+      document.getElementById("zva-pythonPath").value = P("pythonPath", "");
+      document.getElementById("zva-helperScriptPath").value = P("helperScriptPath", "");
+      document.getElementById("zva-customCommandPath").value = P("customCommandPath", "");
+      document.getElementById("zva-customCommandArgs").value = P("customCommandArgs", "");
+      document.getElementById("zva-whisperModel").value = P("whisperModel", "base");
+      document.getElementById("zva-silenceTimeout").value = P("silenceTimeout", 5);
+      document.getElementById("zva-skipDuplicates").checked = P("skipDuplicates", true);
+      document.getElementById("zva-logLevel").value = P("logLevel", "info");
+      document.getElementById("zva-liveMode").value = P("liveMode", "toggle");
+      document.getElementById("zva-liveShortcut").value = P("liveShortcut", "CmdOrCtrl+Shift+V");
+      document.getElementById("zva-liveFlushInterval").value = P("liveFlushInterval", 2);
+      document.getElementById("zva-liveShowOverlay").checked = P("liveShowOverlay", true) !== false;
+      captureShortcut(document.getElementById("zva-liveShortcut"));
       renderTriggers();
       mvLog("init done");
     } catch (e) {
@@ -230,13 +230,13 @@
   }
 
   function onPaneLoad(e) {
-    if (e.target && e.target.id === "marginalvoice-preferences") {
+    if (e.target && e.target.id === "zva-preferences") {
       document.removeEventListener("load", onPaneLoad, true);
       init();
     }
   }
 
-  window.MVPrefs = {
+  window.ZVAPrefs = {
     addTriggerRow,
     resetDefaults,
     saveAllPrefs

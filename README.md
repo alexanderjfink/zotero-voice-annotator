@@ -1,10 +1,10 @@
-# Marginal Voice
+# Zotero Voice Annotator
 
 A Zotero plugin that transcribes audio recordings and turns spoken quotes into PDF highlight annotations.
 
 ## What it does
 
-Marginal Voice listens to audio attachments in your Zotero library, transcribes them locally with OpenAI Whisper (via `faster-whisper`), and looks for spoken quotes triggered by a keyword or phrase. When it finds text in the attached PDF that matches what you said, it creates a colored highlight annotation on the exact sentence and attaches your remaining spoken commentary as an annotation note.
+Zotero Voice Annotator listens to audio attachments in your Zotero library, transcribes them locally with OpenAI Whisper (via `faster-whisper`), and looks for spoken quotes triggered by a keyword or phrase. When it finds text in the attached PDF that matches what you said, it creates a colored highlight annotation on the exact sentence and attaches your remaining spoken commentary as an annotation note.
 
 You can define multiple trigger phrases, each with its own highlight color. For example:
 
@@ -20,13 +20,13 @@ You can define multiple trigger phrases, each with its own highlight color. For 
    pip install faster-whisper pymupdf sounddevice
    ```
 
-2. Download the latest `marginal-voice.xpi` from the [releases page](https://github.com/alexanderjfink/marginal-voice/releases).
+2. Download the latest `zotero-voice-annotator.xpi` from the [releases page](https://github.com/alexanderjfink/zotero-voice-annotator/releases).
 
 3. In Zotero, go to **Tools → Plugins**.
 
 4. Click the gear icon and choose **Install Plugin From File...**.
 
-5. Select `marginal-voice.xpi`.
+5. Select `zotero-voice-annotator.xpi`.
 
 6. Restart Zotero when prompted.
 
@@ -36,7 +36,7 @@ You can define multiple trigger phrases, each with its own highlight color. For 
 
 2. In the Zotero items pane, right-click the audio attachment.
 
-3. Choose **Marginal Voice → Transcribe and Annotate** to process the selected audio, or **Transcribe and Annotate All Audio** to process every audio attachment on the parent item.
+3. Choose **Zotero Voice Annotator → Transcribe and Annotate** to process the selected audio, or **Transcribe and Annotate All Audio** to process every audio attachment on the parent item.
 
 4. The plugin will:
    - Transcribe the audio locally, capturing word-level timestamps.
@@ -57,7 +57,7 @@ And the PDF contains the sentence:
 
 > "The EU has adopted a comprehensive regulatory framework."
 
-Marginal Voice will:
+Zotero Voice Annotator will:
 - Highlight that full sentence in **blue**.
 - Attach a note reading: "and I'm thinking about how this will affect member states."
 
@@ -69,7 +69,7 @@ Multi-word triggers such as "Main Theory" or "Key Point" are supported.
 
 ## Configuration
 
-Open **Zotero Preferences → Marginal Voice** to change:
+Open **Zotero Preferences → Zotero Voice Annotator** to change:
 
 - **Trigger Words &amp; Colors**: add, remove, or edit trigger phrases and assign each a highlight color. Defaults are `quote` (yellow), `Main Theory` (blue), `Key Point` (red), and `Definition` (green).
 - **Silence Timeout**: maximum silence gap (in seconds) before a spoken annotation commentary is cut off. Requires Python transcription mode with word timestamps.
@@ -85,7 +85,7 @@ Live annotation lets you dictate highlights directly into the PDF reader:
 2. Press the configured shortcut (**⌘/Ctrl+Shift+V** by default) or click the 🎙 button in the reader toolbar.
 3. Speak a trigger phrase, pause briefly, and continue with the quote and commentary — highlights appear as you talk.
 
-**Recording modes** (set in Preferences → Marginal Voice):
+**Recording modes** (set in Preferences → Zotero Voice Annotator):
 
 - **Toggle**: press the shortcut once to start, again to stop.
 - **Push-to-talk**: hold the shortcut while speaking, release to stop.
@@ -98,11 +98,11 @@ Note: live mode requires microphone access for the Python process. On macOS you 
 ## Building from source
 
 ```bash
-cd marginal-voice
+cd zotero-voice-annotator
 ./build.sh
 ```
 
-The output is `marginal-voice-1.1.0.xpi` in the project root.
+The output is `zotero-voice-annotator-1.1.0.xpi` in the project root.
 
 ## License
 

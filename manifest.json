@@ -1,18 +1,18 @@
 {
   "manifest_version": 2,
-  "name": "Marginal Voice",
+  "name": "Zotero Voice Annotator",
   "version": "1.1.0",
   "description": "Transcribe audio recordings and create PDF highlights from spoken quotes. Includes live voice annotation in the PDF reader.",
   "author": "Alexander Fink",
-  "homepage_url": "https://github.com/alexanderjfink/marginal-voice",
+  "homepage_url": "https://github.com/alexanderjfink/zotero-voice-annotator",
   "icons": {
     "48": "skin/icon-48.png",
     "96": "skin/icon-96.png"
   },
   "applications": {
     "zotero": {
-      "id": "marginal-voice@alexanderjfink.github.io",
-      "update_url": "https://raw.githubusercontent.com/alexanderjfink/marginal-voice/main/updates.json",
+      "id": "zotero-voice-annotator@alexanderjfink.github.io",
+      "update_url": "https://raw.githubusercontent.com/alexanderjfink/zotero-voice-annotator/main/updates.json",
       "strict_min_version": "6.999",
       "strict_max_version": "10.*"
     }
