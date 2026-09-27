@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Marginal Voice",
-  "version": "1.0.0",
-  "description": "Transcribe audio recordings and create PDF highlights from spoken quotes.",
+  "version": "1.1.0",
+  "description": "Transcribe audio recordings and create PDF highlights from spoken quotes. Includes live voice annotation in the PDF reader.",
   "author": "Alexander Fink",
   "homepage_url": "https://github.com/alexanderjfink/marginal-voice",
   "icons": {

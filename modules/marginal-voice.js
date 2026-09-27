@@ -8,6 +8,29 @@ const MarginalVoice = {
   rootURI: null,
   menuItems: [],
 
+  // Live voice annotation state
+  live: {
+    active: false,           // live mode engaged
+    capturing: false,        // mic stream process running
+    reader: null,            // Zotero reader instance
+    pdfItem: null,
+    pdfPath: null,
+    processPromise: null,
+    streamOutPath: null,
+    stopFilePath: null,
+    words: [],               // accumulated streamed words
+    pendingTriggers: [],     // detected but not yet resolved triggers
+    detectedStarts: new Set(), // word indices already detected as triggers
+    scannedWords: 0,
+    queue: null,             // serializes annotation work
+    pollTimer: null,
+    partialLine: "",
+    lastRead: 0,
+    streamDone: false,
+    toolbarButtons: [],      // [{ reader, button }]
+    overlayDocs: []          // iframe documents that received an overlay
+  },
+
   // Zotero's standard annotation highlight colors
   colors: {
     yellow: "#ffd400",
@@ -102,6 +125,10 @@ const MarginalVoice = {
     } else {
       this.log("warn", "Zotero.PreferencePanes not available");
     }
+
+    // PDF reader integration (live voice annotation)
+    this.live.queue = Promise.resolve();
+    this.registerReaderIntegration();
   },
 
   async extractHelperScript() {
@@ -159,6 +186,18 @@ const MarginalVoice = {
   shutdown() {
     this.log("info", "Shutting down Marginal Voice plugin");
     this.unregisterMenus();
+    // Stop any active live capture and remove reader UI
+    if (this.live.active || this.live.capturing) {
+      this.stopCapture(true).catch(e => this.log("warn", "Live shutdown:", e));
+    }
+    for (const doc of this.live.overlayDocs) {
+      try {
+        const el = doc.getElementById("marginalvoice-overlay");
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      } catch (e) {}
+    }
+    this.live.overlayDocs = [];
+    this.live.toolbarButtons = [];
   },
 
   onMainWindowLoad({ window }) {
@@ -240,6 +279,729 @@ const MarginalVoice = {
       }
     }
     this.menuItems = [];
+  },
+
+  // ---------------------------------------------------------------
+  // Live Voice Annotation
+  // ---------------------------------------------------------------
+
+  registerReaderIntegration() {
+    if (!Zotero.Reader || typeof Zotero.Reader.registerEventListener !== "function") {
+      this.log("warn", "Zotero.Reader.registerEventListener unavailable; live annotation disabled");
+      return;
+    }
+    this.log("info", "Registering PDF reader integration (live voice annotation)");
+    Zotero.Reader.registerEventListener("renderToolbar", (event) => {
+      if (!event.reader || event.reader.type !== "pdf") return;
+      try {
+        // Toolbar button (documented append() path)
+        const button = this.createToolbarButton(event.reader, event.doc);
+        if (button && typeof event.append === "function") {
+          event.append(button);
+        }
+        // Overlay + shortcut live in the reader iframe document
+        this.injectLiveOverlay(event.reader, event.doc);
+        this.attachShortcutHandler(event.reader, event.doc);
+      } catch (e) {
+        this.log("error", "renderToolbar injection failed:", e);
+      }
+    }, this.id);
+  },
+
+  createToolbarButton(reader, doc) {
+    if (doc.getElementById("marginalvoice-toggle-button")) return null;
+    const button = doc.createElement("button");
+    button.id = "marginalvoice-toggle-button";
+    button.className = "toolbar-button";
+    button.title = "Marginal Voice: Live Voice Annotation";
+    button.textContent = "🎙";
+    button.style.fontSize = "13px";
+    button.style.cursor = "pointer";
+    button.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.toggleLive(reader);
+    });
+    this.live.toolbarButtons.push({ reader, button });
+    return button;
+  },
+
+  injectLiveOverlay(reader, doc) {
+    if (!doc || !doc.body) return;
+    if (Zotero.Prefs.get("extensions.marginalvoice.liveShowOverlay", true) === false) return;
+    if (doc.getElementById("marginalvoice-overlay")) return;
+
+    const overlay = doc.createElement("div");
+    overlay.id = "marginalvoice-overlay";
+    overlay.style.cssText =
+      "position: fixed; z-index: 99999; width: 220px; background: rgba(255,255,255,0.96);" +
+      "border: 1px solid #bbb; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);" +
+      "font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 12px; color: #333; user-select: none;";
+
+    const header = doc.createElement("div");
+    header.id = "marginalvoice-overlay-header";
+    header.style.cssText =
+      "display: flex; align-items: center; justify-content: space-between; padding: 5px 8px;" +
+      "background: #2c3e50; color: #fff; border-radius: 5px 5px 0 0; cursor: move; font-weight: 600;";
+    const title = doc.createElement("span");
+    title.textContent = "Marginal Voice";
+    const minimize = doc.createElement("button");
+    minimize.textContent = "–";
+    minimize.title = "Minimize";
+    minimize.style.cssText =
+      "background: transparent; color: #fff; border: none; cursor: pointer; font-size: 14px; line-height: 1;";
+    header.appendChild(title);
+    header.appendChild(minimize);
+
+    const status = doc.createElement("div");
+    status.id = "marginalvoice-overlay-status";
+    status.style.cssText = "padding: 4px 8px; font-weight: 600; border-bottom: 1px solid #eee;";
+    status.textContent = "Idle";
+
+    const list = doc.createElement("div");
+    list.id = "marginalvoice-overlay-triggers";
+    list.style.cssText = "padding: 6px 8px; max-height: 180px; overflow-y: auto;";
+
+    overlay.appendChild(header);
+    overlay.appendChild(status);
+    overlay.appendChild(list);
+    doc.body.appendChild(overlay);
+    if (!this.live.overlayDocs.includes(doc)) this.live.overlayDocs.push(doc);
+
+    this.positionOverlay(overlay);
+    this.renderOverlayTriggers(overlay, doc);
+    this.updateLiveOverlayStatus(doc, "idle");
+
+    minimize.addEventListener("click", () => {
+      const collapsed = overlay.dataset.collapsed === "true";
+      overlay.dataset.collapsed = String(!collapsed);
+      list.style.display = collapsed ? "" : "none";
+      status.style.display = collapsed ? "" : "none";
+      minimize.textContent = collapsed ? "–" : "+";
+      overlay.style.width = collapsed ? "220px" : "130px";
+    });
+
+    this.makeDraggable(header, overlay, doc);
+  },
+
+  positionOverlay(overlay) {
+    const pos = this.getOverlayPos();
+    if (pos && typeof pos.x === "number") {
+      overlay.style.right = "auto";
+      overlay.style.left = pos.x + "px";
+      overlay.style.top = pos.y + "px";
+    } else {
+      overlay.style.right = "16px";
+      overlay.style.top = "16px";
+    }
+  },
+
+  getOverlayPos() {
+    try {
+      const raw = Zotero.Prefs.get("extensions.marginalvoice.liveOverlayPos", true);
+      if (!raw) return null;
+      const pos = JSON.parse(raw);
+      return (pos && typeof pos.x === "number" && typeof pos.y === "number") ? pos : null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  setOverlayPos(pos) {
+    try {
+      Zotero.Prefs.set("extensions.marginalvoice.liveOverlayPos", JSON.stringify(pos), true);
+    } catch (e) {
+      this.log("debug", "setOverlayPos:", e.message);
+    }
+  },
+
+  makeDraggable(header, overlay, doc) {
+    let dragging = false;
+    let startX = 0, startY = 0, origX = 0, origY = 0;
+    header.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = overlay.getBoundingClientRect();
+      origX = rect.left;
+      origY = rect.top;
+      e.preventDefault();
+    });
+    doc.defaultView.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      overlay.style.right = "auto";
+      overlay.style.left = (origX + (e.clientX - startX)) + "px";
+      overlay.style.top = (origY + (e.clientY - startY)) + "px";
+    });
+    doc.defaultView.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      const rect = overlay.getBoundingClientRect();
+      this.setOverlayPos({ x: Math.round(rect.left), y: Math.round(rect.top) });
+    });
+  },
+
+  renderOverlayTriggers(overlay, doc) {
+    const list = overlay.querySelector("#marginalvoice-overlay-triggers");
+    if (!list) return;
+    list.textContent = "";
+    const triggers = this.getTriggers();
+    for (const t of triggers) {
+      const row = doc.createElement("div");
+      row.style.cssText = "display: flex; align-items: center; margin: 2px 0;";
+      const swatch = doc.createElement("span");
+      swatch.style.cssText = `display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; flex: none; background: ${t.color || "#ffd400"};`;
+      const label = doc.createElement("span");
+      label.textContent = t.phrase;
+      row.appendChild(swatch);
+      row.appendChild(label);
+      list.appendChild(row);
+    }
+  },
+
+  updateLiveOverlayStatus(doc, status) {
+    const overlay = doc && doc.getElementById("marginalvoice-overlay");
+    const el = overlay && overlay.querySelector("#marginalvoice-overlay-status");
+    if (!el) return;
+    const map = {
+      idle: ["Idle", "#888"],
+      listening: ["Listening…", "#2ecc71"],
+      processing: ["Processing…", "#e67e22"],
+      error: ["Error", "#e74c3c"]
+    };
+    const [text, color] = map[status] || map.idle;
+    el.textContent = text;
+    el.style.color = color;
+  },
+
+  updateLiveOverlayForReader(reader, status) {
+    const doc = this.getReaderDoc(reader);
+    if (doc) this.updateLiveOverlayStatus(doc, status);
+  },
+
+  getReaderDoc(reader) {
+    if (!reader) return null;
+    return (reader._iframeWindow && reader._iframeWindow.document) || null;
+  },
+
+  attachShortcutHandler(reader, doc) {
+    if (!doc || doc._mvShortcutAttached) return;
+    doc._mvShortcutAttached = true;
+    const shortcut = this.parseShortcut(this.getLiveShortcut());
+    if (!shortcut) return;
+
+    doc.addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!this.matchesShortcut(e, shortcut)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const mode = this.getLiveMode();
+      if (mode === "push") {
+        this.startCaptureForReader(reader);
+      } else {
+        this.toggleLive(reader);
+      }
+    }, true);
+
+    doc.addEventListener("keyup", (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!this.matchesShortcut(e, shortcut)) return;
+      if (this.getLiveMode() === "push") {
+        this.stopCaptureForReader(reader, false);
+      }
+    }, true);
+  },
+
+  getLiveMode() {
+    return Zotero.Prefs.get("extensions.marginalvoice.liveMode", true) || "toggle";
+  },
+
+  getLiveShortcut() {
+    return Zotero.Prefs.get("extensions.marginalvoice.liveShortcut", true) || "CmdOrCtrl+Shift+V";
+  },
+
+  parseShortcut(str) {
+    if (!str) return null;
+    const parts = str.split("+").map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    const key = parts.pop();
+    return { key: this.canonicalKey(key), mods: parts };
+  },
+
+  canonicalKey(k) {
+    if (!k) return null;
+    if (k === " " || k.toLowerCase() === "space") return "SPACE";
+    return k.toUpperCase();
+  },
+
+  matchesShortcut(e, parsed) {
+    if (!parsed) return false;
+    const modsOK = parsed.mods.every(m => {
+      if (m === "CmdOrCtrl" || m === "CmdCtrl") return e.metaKey || e.ctrlKey;
+      if (m === "Ctrl" || m === "Control") return e.ctrlKey;
+      if (m === "Cmd" || m === "Meta") return e.metaKey;
+      if (m === "Alt" || m === "Option") return e.altKey;
+      if (m === "Shift") return e.shiftKey;
+      return false;
+    });
+    if (!modsOK) return false;
+    const key = this.canonicalKey(e.key);
+    return key !== null && key === parsed.key;
+  },
+
+  async toggleLive(reader) {
+    try {
+      if (this.live.active) {
+        if (this.live.reader !== reader) {
+          // Live is running in another reader; stop it there first
+          await this.exitLive();
+          await this.enterLive(reader);
+        } else {
+          await this.exitLive();
+        }
+      } else {
+        await this.enterLive(reader);
+      }
+    } catch (err) {
+      this.log("error", "toggleLive error:", err);
+      this.updateLiveOverlayForReader(reader, "error");
+    }
+  },
+
+  async enterLive(reader) {
+    if (!reader || !reader.itemID) {
+      const win = Zotero.getMainWindows()[0];
+      Zotero.alert(win, "Marginal Voice", "Open a PDF in the reader to start live annotation.");
+      return;
+    }
+    if (this.live.active) return;
+    this.live.reader = reader;
+    this.live.pdfItem = Zotero.Items.get(reader.itemID);
+    if (!this.live.pdfItem) throw new Error("Cannot resolve PDF item.");
+    this.live.pdfPath = await this.live.pdfItem.getFilePathAsync();
+    if (!this.live.pdfPath) throw new Error("Cannot access PDF file path.");
+    this.live.active = true;
+    this.log("info", "Live voice annotation started for item", reader.itemID);
+    this.setToolbarState(true);
+    this.updateLiveOverlayForReader(reader, "listening");
+    await this.startCapture();
+  },
+
+  async exitLive() {
+    if (!this.live.active && !this.live.capturing) return;
+    await this.stopCapture(true);
+  },
+
+  async startCaptureForReader(reader) {
+    try {
+      if (this.live.active && this.live.reader !== reader) {
+        await this.exitLive();
+      }
+      if (this.live.active) {
+        await this.startCapture();
+      } else {
+        await this.enterLive(reader);
+      }
+    } catch (e) {
+      this.log("error", "startCaptureForReader:", e);
+    }
+  },
+
+  async stopCaptureForReader(reader, final) {
+    try {
+      await this.stopCapture(final);
+    } catch (e) {
+      this.log("error", "stopCaptureForReader:", e);
+    }
+  },
+
+  async startCapture() {
+    if (this.live.capturing) return;
+    const pythonPath = this.getPythonPath();
+    const helperPath = this.getHelperScriptPath();
+    const model = Zotero.Prefs.get("extensions.marginalvoice.whisperModel", true) || "base";
+    const flushInterval = Number(Zotero.Prefs.get("extensions.marginalvoice.liveFlushInterval", true)) || 2;
+
+    const tmpDir = Zotero.getTempDirectory();
+    const outFile = tmpDir.clone();
+    outFile.append("marginalvoice_stream_" + Zotero.Utilities.randomString(8) + ".jsonl");
+    const stopFile = tmpDir.clone();
+    stopFile.append("marginalvoice_stop_" + Zotero.Utilities.randomString(8) + ".txt");
+
+    this.live.streamOutPath = outFile.path;
+    this.live.stopFilePath = stopFile.path;
+    this.live.partialLine = "";
+    this.live.lastRead = 0;
+    this.live.streamDone = false;
+
+    const args = [
+      helperPath, "stream",
+      "--model", model,
+      "--flush-interval", String(flushInterval),
+      "--stop-file", stopFile.path,
+      "--output-file", outFile.path
+    ];
+    this.log("info", "Starting live capture:", pythonPath, args.join(" "));
+
+    this.live.capturing = true;
+    try {
+      this.live.processPromise = this.runCommandAsync(pythonPath, args);
+      // Avoid unhandled rejection if the process fails to start
+      this.live.processPromise.catch(e => this.log("warn", "Live stream process error:", e.message));
+    } catch (err) {
+      this.live.capturing = false;
+      this.updateLiveOverlayForReader(this.live.reader, "error");
+      throw err;
+    }
+
+    if (this.live.pollTimer) clearInterval(this.live.pollTimer);
+    this.live.pollTimer = setInterval(() => {
+      this.pollStreamOutput().catch(e => this.log("debug", "poll error:", e.message));
+    }, 300);
+  },
+
+  async stopCapture(final) {
+    if (!this.live.capturing) {
+      if (final) this.cleanupLive();
+      return;
+    }
+    this.live.capturing = false;
+    if (this.live.pollTimer) {
+      clearInterval(this.live.pollTimer);
+      this.live.pollTimer = null;
+    }
+
+    // Signal the Python process to stop (it flushes remaining audio, then exits)
+    if (this.live.stopFilePath) {
+      try {
+        await Zotero.File.putContentsAsync(this.live.stopFilePath, "stop");
+      } catch (e) {
+        this.log("debug", "stop signal:", e.message);
+      }
+    }
+
+    if (this.live.processPromise) {
+      try {
+        await Promise.race([this.live.processPromise, Zotero.Promise.delay(15000)]);
+      } catch (e) {
+        this.log("warn", "Stream process did not exit cleanly:", e.message);
+      }
+    }
+
+    // Pick up any remaining output and force-resolve pending triggers
+    try { await this.pollStreamOutput(); } catch (e) {}
+    try { await this.processStreamWords(true); } catch (e) {}
+
+    if (final) {
+      this.cleanupLive();
+    } else {
+      this.updateLiveOverlayForReader(this.live.reader, "idle");
+    }
+  },
+
+  cleanupLive() {
+    const doc = this.getReaderDoc(this.live.reader);
+    this.live.active = false;
+    this.live.capturing = false;
+    this.live.reader = null;
+    this.live.pdfItem = null;
+    this.live.pdfPath = null;
+    this.live.processPromise = null;
+    this.live.words = [];
+    this.live.pendingTriggers = [];
+    this.live.detectedStarts = new Set();
+    this.live.scannedWords = 0;
+    this.live.streamDone = false;
+    this.live.queue = Promise.resolve();
+    if (this.live.streamOutPath) { try { this.removeFile(this.live.streamOutPath); } catch (e) {} }
+    if (this.live.stopFilePath) { try { this.removeFile(this.live.stopFilePath); } catch (e) {} }
+    this.live.streamOutPath = null;
+    this.live.stopFilePath = null;
+    this.setToolbarState(false);
+    if (doc) this.updateLiveOverlayStatus(doc, "idle");
+  },
+
+  async pollStreamOutput() {
+    if (!this.live.active && !this.live.capturing) return;
+
+    // Stop if the reader/document that owns this session is gone
+    if (this.live.capturing && this.live.reader) {
+      let alive = false;
+      try {
+        const doc = this.getReaderDoc(this.live.reader);
+        alive = !!(doc && doc.body && doc.defaultView);
+      } catch (e) {
+        alive = false;
+      }
+      if (!alive) {
+        this.log("warn", "Reader no longer available; stopping live annotation");
+        await this.exitLive();
+        return;
+      }
+    }
+
+    if (!this.live.streamOutPath) return;
+    let text;
+    try {
+      text = await Zotero.File.getContentsAsync(this.live.streamOutPath);
+    } catch (e) {
+      return; // output file not created yet
+    }
+
+    if (text.length > this.live.lastRead) {
+      this.live.partialLine += text.slice(this.live.lastRead);
+      this.live.lastRead = text.length;
+      const lines = this.live.partialLine.split("\n");
+      this.live.partialLine = lines.pop(); // may be an incomplete line
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) this.handleStreamLine(trimmed);
+      }
+    }
+
+    await this.processStreamWords(false);
+  },
+
+  handleStreamLine(line) {
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch (e) {
+      return;
+    }
+    if (obj.type === "ready") {
+      this.log("info", "Live capture ready");
+      this.updateLiveOverlayForReader(this.live.reader, "listening");
+    } else if (obj.type === "words") {
+      if (Array.isArray(obj.words) && obj.words.length > 0) {
+        for (const w of obj.words) {
+          this.live.words.push({
+            word: (w.word || "").trim(),
+            normalized: w.normalized || this.normalizeWord(w.word || ""),
+            start: typeof w.start === "number" ? w.start : null,
+            end: typeof w.end === "number" ? w.end : null
+          });
+        }
+        this.log("debug", `Live: received ${obj.words.length} words (total ${this.live.words.length})`);
+        this.updateLiveOverlayForReader(this.live.reader, "processing");
+      }
+    } else if (obj.type === "done") {
+      this.live.streamDone = true;
+    } else if (obj.type === "error") {
+      this.log("error", "Live capture error:", obj.error);
+      this.updateLiveOverlayForReader(this.live.reader, "error");
+      // The stream is unusable; tear down.
+      this.exitLive().catch(e => this.log("warn", "exitLive after error:", e));
+    }
+  },
+
+  processStreamWords(force) {
+    if (!this.live.active && !force) return;
+    if (!this.live.queue) this.live.queue = Promise.resolve();
+    this.live.queue = this.live.queue
+      .then(() => this.doProcessStreamWords(force))
+      .catch(e => this.log("error", "processStreamWords:", e));
+    return this.live.queue;
+  },
+
+  async doProcessStreamWords(force) {
+    try {
+      if (!this.live.active && !force) return;
+      this.scanForStreamTriggers();
+      const pending = this.live.pendingTriggers.filter(t => !t.resolved);
+      if (pending.length === 0) {
+        this.updateLiveOverlayForReader(this.live.reader, "listening");
+        return;
+      }
+
+      const silenceTimeout = this.getSilenceTimeout();
+      const maxQuoteWords = 12;
+      const available = this.live.words.length;
+
+      const resolvable = [];
+      for (const occ of pending) {
+        let boundary = occ.endWordIndex + maxQuoteWords;
+        const nextTrigger = pending.find(t => t.startWordIndex > occ.startWordIndex);
+        if (nextTrigger) boundary = Math.min(boundary, nextTrigger.startWordIndex);
+
+        let silenceBoundary = null;
+        if (silenceTimeout && silenceTimeout > 0) {
+          for (let j = occ.endWordIndex; j < this.live.words.length - 1; j++) {
+            const gap = this.live.words[j + 1].start - this.live.words[j].end;
+            if (gap >= silenceTimeout) {
+              silenceBoundary = j + 1;
+              break;
+            }
+          }
+        }
+        if (silenceBoundary !== null) boundary = Math.min(boundary, silenceBoundary);
+
+        const canResolve = force || silenceBoundary !== null || !!nextTrigger || available >= boundary;
+        if (canResolve) {
+          resolvable.push({ occ, boundary: Math.min(boundary, available) });
+        }
+      }
+
+      for (const { occ, boundary } of resolvable) {
+        occ.resolved = true;
+        this.updateLiveOverlayForReader(this.live.reader, "processing");
+        await this.resolveLiveTrigger(occ, boundary);
+      }
+
+      if (this.live.active) {
+        this.updateLiveOverlayForReader(this.live.reader, "listening");
+      }
+    } catch (e) {
+      this.log("error", "doProcessStreamWords:", e);
+    }
+  },
+
+  scanForStreamTriggers() {
+    const triggers = this.getTriggers();
+    const maxLen = triggers.reduce((m, t) => Math.max(m, t.phrase.split(/\s+/).filter(Boolean).length), 1);
+    const scanFrom = Math.max(0, this.live.scannedWords - maxLen + 1);
+    if (scanFrom >= this.live.words.length) return;
+
+    const slice = this.live.words.slice(scanFrom);
+    const occs = this.findTriggerOccurrences(slice, triggers);
+    for (const o of occs) {
+      const start = scanFrom + o.startWordIndex;
+      const end = scanFrom + o.endWordIndex;
+      if (this.live.detectedStarts.has(start)) continue;
+      this.live.detectedStarts.add(start);
+      this.live.pendingTriggers.push({
+        startWordIndex: start,
+        endWordIndex: end,
+        phrase: o.phrase,
+        color: o.color,
+        resolved: false
+      });
+      this.log("info", `Live trigger '${o.phrase}' detected at word ${start}`);
+    }
+    this.live.scannedWords = this.live.words.length;
+  },
+
+  async resolveLiveTrigger(occ, boundary) {
+    try {
+      if (!this.live.pdfPath) return;
+      const contentWords = this.live.words.slice(occ.endWordIndex, boundary);
+      if (contentWords.length === 0) return;
+
+      // Progressively match the spoken words after the trigger against the PDF
+      const maxWords = Math.min(6, contentWords.length);
+      let matchedCount = 0;
+      for (let count = maxWords; count >= 1; count--) {
+        const probe = contentWords.slice(0, count).map(w => w.word).join(" ");
+        const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
+        if (m) {
+          matchedCount = count;
+          break;
+        }
+      }
+      if (matchedCount === 0) {
+        this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} did not match the PDF; skipping`);
+        return;
+      }
+
+      const segment = {
+        trigger: occ.phrase,
+        color: occ.color,
+        quoteCandidate: contentWords.slice(0, matchedCount).map(w => w.word).join(" "),
+        commentary: contentWords.slice(matchedCount).map(w => w.word).join(" "),
+        words: contentWords,
+        matchedCount
+      };
+      await this.annotateLiveSegment(segment);
+    } catch (e) {
+      this.log("error", "resolveLiveTrigger:", e);
+    }
+  },
+
+  async annotateLiveSegment(segment) {
+    const pdfPath = this.live.pdfPath;
+    const pdfItem = this.live.pdfItem;
+    this.log("info", `Live segment for trigger '${segment.trigger}': quote='${segment.quoteCandidate}'`);
+
+    const match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate);
+    if (!match) {
+      this.log("warn", "Live: no match for quote:", segment.quoteCandidate);
+      return;
+    }
+
+    const expanded = this.expandQuoteToSpokenWords(segment, match);
+    const quoteCandidate = expanded.quoteCandidate;
+    const commentary = expanded.commentary || match.commentary || "";
+
+    const finalMatch = quoteCandidate !== segment.quoteCandidate
+      ? (await this.matchQuoteInPDF(pdfPath, quoteCandidate)) || match
+      : match;
+
+    const appendToExisting = Zotero.Prefs.get("extensions.marginalvoice.skipDuplicates", true) !== false;
+    const existingAnnotation = appendToExisting ? await this.findExistingAnnotation(pdfItem, finalMatch.sentence, finalMatch) : null;
+    if (existingAnnotation) {
+      await this.appendCommentaryToAnnotation(existingAnnotation, commentary);
+      this.log("info", "Live: appended commentary:", finalMatch.sentence);
+    } else {
+      await this.createHighlightAnnotation(pdfItem, finalMatch.sentence, commentary, finalMatch, segment.color);
+      this.log("info", "Live: created annotation:", finalMatch.sentence);
+    }
+  },
+
+  setToolbarState(active) {
+    for (const tb of this.live.toolbarButtons) {
+      if (active) {
+        const isThisReader = this.live.reader && tb.reader.itemID === this.live.reader.itemID;
+        if (!isThisReader) continue;
+      }
+      tb.button.title = active
+        ? "Marginal Voice: Stop Live Annotation"
+        : "Marginal Voice: Live Voice Annotation";
+      tb.button.style.background = active ? "#2ecc71" : "";
+    }
+  },
+
+  async runCommandAsync(cmdPath, args) {
+    const cmdFile = Components.classes["@mozilla.org/file/local;1"]
+      .createInstance(Components.interfaces.nsIFile);
+    cmdFile.initWithPath(cmdPath);
+    if (!cmdFile.exists()) {
+      throw new Error(`Command not found: ${cmdPath}`);
+    }
+    const process = Components.classes["@mozilla.org/process/util;1"]
+      .createInstance(Components.interfaces.nsIProcess);
+    process.init(cmdFile);
+    process.startHidden = true;
+
+    return new Promise((resolve, reject) => {
+      const observer = {
+        observe(subject, topic) {
+          if (topic === "process-finished") {
+            resolve(subject.exitValue);
+          } else if (topic === "process-failed") {
+            reject(new Error("Process failed to start"));
+          }
+        }
+      };
+      try {
+        if (Zotero.isWin && process.runwAsync) {
+          process.runwAsync(args, args.length, observer);
+        } else {
+          process.runAsync(args, args.length, observer);
+        }
+      } catch (e) {
+        reject(e);
+      }
+    });
+  },
+
+  removeFile(path) {
+    const f = Components.classes["@mozilla.org/file/local;1"]
+      .createInstance(Components.interfaces.nsIFile);
+    f.initWithPath(path);
+    if (f.exists()) f.remove(false);
   },
 
   isAudioAttachment(item) {

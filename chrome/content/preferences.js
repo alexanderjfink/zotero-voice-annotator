@@ -160,6 +160,28 @@
     renderTriggers();
   }
 
+  function captureShortcut(input) {
+    if (!input) return;
+    input.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Ignore bare modifier presses
+      if (e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") return;
+      const mods = [];
+      if (e.metaKey || e.ctrlKey) mods.push("CmdOrCtrl");
+      if (e.altKey) mods.push("Alt");
+      if (e.shiftKey) mods.push("Shift");
+      const key = e.key === " " ? "Space" : (e.key.length === 1 ? e.key.toUpperCase() : e.key);
+      const combo = [...mods, key].join("+");
+      input.value = combo;
+      SP("liveShortcut", combo);
+      saveAllPrefs();
+    });
+    input.addEventListener("click", () => {
+      input.select();
+    });
+  }
+
   function saveAllPrefs() {
     mvLog("saveAllPrefs called");
     try {
@@ -172,6 +194,10 @@
       SP("silenceTimeout", parseInt(document.getElementById("marginalvoice-silenceTimeout").value, 10) || 5);
       SP("skipDuplicates", document.getElementById("marginalvoice-skipDuplicates").checked);
       SP("logLevel", document.getElementById("marginalvoice-logLevel").value);
+      SP("liveMode", document.getElementById("marginalvoice-liveMode").value);
+      SP("liveShortcut", document.getElementById("marginalvoice-liveShortcut").value);
+      SP("liveFlushInterval", parseInt(document.getElementById("marginalvoice-liveFlushInterval").value, 10) || 2);
+      SP("liveShowOverlay", document.getElementById("marginalvoice-liveShowOverlay").checked);
       saveTriggers(collectTriggers());
       mvLog("saveAllPrefs done");
     } catch (e) {
@@ -191,6 +217,11 @@
       document.getElementById("marginalvoice-silenceTimeout").value = P("silenceTimeout", 5);
       document.getElementById("marginalvoice-skipDuplicates").checked = P("skipDuplicates", true);
       document.getElementById("marginalvoice-logLevel").value = P("logLevel", "info");
+      document.getElementById("marginalvoice-liveMode").value = P("liveMode", "toggle");
+      document.getElementById("marginalvoice-liveShortcut").value = P("liveShortcut", "CmdOrCtrl+Shift+V");
+      document.getElementById("marginalvoice-liveFlushInterval").value = P("liveFlushInterval", 2);
+      document.getElementById("marginalvoice-liveShowOverlay").checked = P("liveShowOverlay", true) !== false;
+      captureShortcut(document.getElementById("marginalvoice-liveShortcut"));
       renderTriggers();
       mvLog("init done");
     } catch (e) {

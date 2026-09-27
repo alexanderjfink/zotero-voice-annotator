@@ -9,3 +9,8 @@ pref("extensions.marginalvoice.fuzzyThreshold", "0.6");
 pref("extensions.marginalvoice.silenceTimeout", 5);
 pref("extensions.marginalvoice.skipDuplicates", true);
 pref("extensions.marginalvoice.logLevel", "info");
+pref("extensions.marginalvoice.liveMode", "toggle");
+pref("extensions.marginalvoice.liveShortcut", "CmdOrCtrl+Shift+V");
+pref("extensions.marginalvoice.liveShowOverlay", true);
+pref("extensions.marginalvoice.liveFlushInterval", 2);
+pref("extensions.marginalvoice.liveOverlayPos", "");

@@ -112,9 +112,45 @@
   </groupbox>
 
   <groupbox style="margin-top: 12px;">
+    <label value="Live Voice Annotation" style="font-weight: bold;" />
+
+    <description style="margin-top: 5px; font-size: 0.9em; color: gray;">
+      In the PDF reader, press the shortcut or the mic button to annotate live.
+      Requires: pip install faster-whisper pymupdf sounddevice
+    </description>
+
+    <hbox class="mv-row" align="center">
+      <html:label for="marginalvoice-liveMode">Recording Mode:</html:label>
+      <menulist id="marginalvoice-liveMode" oncommand="MVPrefs.saveAllPrefs()">
+        <menupopup>
+          <menuitem value="toggle" label="Toggle (press to start/stop)" />
+          <menuitem value="push" label="Push-to-talk (hold to record)" />
+          <menuitem value="voice" label="Voice-activated (auto on silence)" />
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox class="mv-row" align="center">
+      <html:label for="marginalvoice-liveShortcut">Keyboard Shortcut:</html:label>
+      <html:input type="text" id="marginalvoice-liveShortcut" readonly="readonly"
+                  style="width: 180px; background: #f4f4f4;"
+                  placeholder="Click, then press keys" />
+    </hbox>
+
+    <hbox class="mv-row" align="center">
+      <html:label for="marginalvoice-liveFlushInterval">Live Transcription Interval (sec):</html:label>
+      <html:input type="number" id="marginalvoice-liveFlushInterval" min="1" max="10" style="width: 80px;" onchange="MVPrefs.saveAllPrefs()" />
+    </hbox>
+
+    <hbox class="mv-row" align="center">
+      <checkbox id="marginalvoice-liveShowOverlay" label="Show trigger word overlay in PDF reader" oncommand="MVPrefs.saveAllPrefs()" />
+    </hbox>
+  </groupbox>
+
+  <groupbox style="margin-top: 12px;">
     <label value="Dependencies" style="font-weight: bold;" />
     <description style="margin-top: 5px; font-size: 0.9em; color: gray;">
-      For Python mode, install: pip install faster-whisper pymupdf
+      For Python mode, install: pip install faster-whisper pymupdf sounddevice
     </description>
   </groupbox>
 

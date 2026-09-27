@@ -3,6 +3,16 @@
     "marginal-voice@alexanderjfink.github.io": {
       "updates": [
         {
+          "version": "1.1.0",
+          "update_link": "https://github.com/alexanderjfink/marginal-voice/releases/download/v1.1.0/marginal-voice-1.1.0.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "6.999",
+              "strict_max_version": "10.*"
+            }
+          }
+        },
+        {
           "version": "1.0.0",
           "update_link": "https://github.com/alexanderjfink/marginal-voice/releases/download/v1.0.0/marginal-voice-1.0.0.xpi",
           "applications": {

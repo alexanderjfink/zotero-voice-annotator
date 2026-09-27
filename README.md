@@ -17,7 +17,7 @@ You can define multiple trigger phrases, each with its own highlight color. For 
 
 1. Install the Python dependencies:
    ```bash
-   pip install faster-whisper pymupdf
+   pip install faster-whisper pymupdf sounddevice
    ```
 
 2. Download the latest `marginal-voice.xpi` from the [releases page](https://github.com/alexanderjfink/marginal-voice/releases).
@@ -77,6 +77,24 @@ Open **Zotero Preferences → Marginal Voice** to change:
 - **Python Path**: path to the Python interpreter if Zotero doesn't use the right one.
 - **Log Level**: how much detail to write to the Zotero debug log.
 
+### Live Voice Annotation
+
+Live annotation lets you dictate highlights directly into the PDF reader:
+
+1. Open a PDF in Zotero's built-in reader.
+2. Press the configured shortcut (**⌘/Ctrl+Shift+V** by default) or click the 🎙 button in the reader toolbar.
+3. Speak a trigger phrase, pause briefly, and continue with the quote and commentary — highlights appear as you talk.
+
+**Recording modes** (set in Preferences → Marginal Voice):
+
+- **Toggle**: press the shortcut once to start, again to stop.
+- **Push-to-talk**: hold the shortcut while speaking, release to stop.
+- **Voice-activated**: press to start; annotations are created automatically on silence gaps.
+
+The trigger word overlay in the top-right of the reader shows the configured trigger phrases with their colors and the current status (Idle / Listening / Processing). It can be dragged, minimized, or disabled in preferences.
+
+Note: live mode requires microphone access for the Python process. On macOS you may need to grant microphone permission to Zotero (or the terminal running Python) under System Settings → Privacy & Security → Microphone.
+
 ## Building from source
 
 ```bash
@@ -84,13 +102,7 @@ cd marginal-voice
 ./build.sh
 ```
 
-The output is `marginal-voice-1.0.0.xpi` in the project root.
-
-## Roadmap
-
-### Live annotation
-
-Eventually Marginal Voice will support **live annotation** while reading a PDF in Zotero. You will be able to start dictation, speak quotes and commentary, and see highlights appear in the PDF reader in real time without pre-recording an audio file.
+The output is `marginal-voice-1.1.0.xpi` in the project root.
 
 ## License
 

@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 
 
 def normalize_word(word):
@@ -355,6 +356,159 @@ def write_output(path, data):
         print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _stream_write(path, obj):
+    """Append a JSON line to the stream output file (or stdout)."""
+    line = json.dumps(obj, ensure_ascii=False)
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+            f.flush()
+    else:
+        print(line, flush=True)
+
+
+def stream(args):
+    """Live microphone transcription that appends JSON lines to a file or stdout.
+
+    Protocol (one JSON object per line):
+      {"type": "ready"}
+      {"type": "words", "offset": <abs seconds>, "words": [{word, normalized, start, end}, ...]}
+      {"type": "done"}
+      {"type": "error", "error": "..."}
+
+    The process exits cleanly (after a final flush) when --stop-file exists.
+    """
+    try:
+        import numpy as np
+        import sounddevice as sd
+        from faster_whisper import WhisperModel
+    except ImportError as e:
+        _stream_write(args.output_file, {"type": "error", "error": f"Missing dependency for live mode (pip install sounddevice): {e}"})
+        return
+
+    def emit(obj):
+        _stream_write(args.output_file, obj)
+
+    try:
+        model_size = args.model or "base"
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+        except ImportError:
+            device = "cpu"
+            compute_type = "int8"
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    except Exception as e:
+        emit({"type": "error", "error": f"Failed to load Whisper model: {e}"})
+        return
+
+    sample_rate = 16000
+    flush_interval = max(0.5, float(args.flush_interval or 2))
+    min_chunk = max(0.25, float(args.min_chunk or 0.5))
+
+    # If a stale stop file exists from a previous run, clear it so we don't
+    # exit immediately.
+    if args.stop_file and os.path.exists(args.stop_file):
+        try:
+            os.remove(args.stop_file)
+        except OSError:
+            pass
+
+    chunks = []            # list of numpy arrays (raw mic audio)
+    total_samples = 0      # running count of recorded samples
+    flushed_samples = 0    # samples already transcribed
+
+    def do_flush(force=False):
+        nonlocal total_samples, flushed_samples, chunks
+        available = total_samples - flushed_samples
+        if available < min_chunk * sample_rate and not force:
+            return
+        if available <= 0:
+            return
+        try:
+            audio = np.concatenate(chunks)[flushed_samples:total_samples]
+        except Exception as e:
+            emit({"type": "error", "error": f"Audio buffer error: {e}"})
+            return
+        if audio.size == 0:
+            return
+        offset = flushed_samples / sample_rate
+        try:
+            segments, _info = model.transcribe(
+                audio,
+                beam_size=1,
+                word_timestamps=True,
+                condition_on_previous_text=False,
+                vad_filter=True,
+            )
+        except Exception as e:
+            emit({"type": "error", "error": f"Transcription error: {e}"})
+            return
+        words = []
+        for segment in segments:
+            sw = getattr(segment, "words", None)
+            if not sw:
+                continue
+            for w in sw:
+                if isinstance(w, tuple):
+                    word_text, start, end = w[0], w[1], w[2]
+                else:
+                    word_text, start, end = w.word, w.start, w.end
+                word_text = (word_text or "").strip()
+                if not normalize_word(word_text):
+                    continue
+                words.append({
+                    "word": word_text,
+                    "normalized": normalize_word(word_text),
+                    "start": round(float(start) + offset, 3),
+                    "end": round(float(end) + offset, 3),
+                })
+        if words:
+            emit({"type": "words", "offset": round(offset, 3), "words": words})
+        flushed_samples = total_samples
+
+        # Trim already-flushed audio from the buffer to bound memory usage.
+        consumed = 0
+        keep_from = 0
+        for i, c in enumerate(chunks):
+            if consumed + len(c) <= flushed_samples:
+                consumed += len(c)
+                keep_from = i + 1
+            else:
+                break
+        if keep_from > 0:
+            chunks = chunks[keep_from:]
+            flushed_samples -= consumed
+            total_samples -= consumed
+
+    def callback(indata, frames, time_info, status):
+        nonlocal total_samples
+        chunks.append(indata.copy())
+        total_samples += len(indata)
+
+    emit({"type": "ready"})
+
+    try:
+        with sd.InputStream(samplerate=sample_rate, channels=1, dtype="float32", callback=callback) as audio_stream:
+            last_flush = time.monotonic()
+            while True:
+                now = time.monotonic()
+                if now - last_flush >= flush_interval:
+                    last_flush = now
+                    do_flush()
+                if args.stop_file and os.path.exists(args.stop_file):
+                    break
+                time.sleep(0.1)
+    except Exception as e:
+        emit({"type": "error", "error": f"Microphone error: {e}"})
+        return
+
+    # Final flush of any remaining audio, then signal completion.
+    do_flush(force=True)
+    emit({"type": "done"})
+
+
 def main():
     parser = argparse.ArgumentParser(description="Zotero Marginal Voice Helper")
     subparsers = parser.add_subparsers(dest="command")
@@ -379,6 +533,14 @@ def main():
     locate_parser.add_argument("--page-hint", type=int, default=None, help="Preferred page index (0-based)")
     locate_parser.add_argument("--output", help="Output JSON file path")
 
+    # Stream subcommand (live microphone transcription)
+    stream_parser = subparsers.add_parser("stream", help="Live microphone transcription (JSONL output)")
+    stream_parser.add_argument("--model", default="base", help="Whisper model size")
+    stream_parser.add_argument("--flush-interval", type=float, default=2.0, help="Seconds between transcription flushes")
+    stream_parser.add_argument("--min-chunk", type=float, default=0.5, help="Minimum seconds of new audio before flushing")
+    stream_parser.add_argument("--stop-file", default=None, help="Stop (after final flush) when this file exists")
+    stream_parser.add_argument("--output-file", default=None, help="JSONL file to append output to (default: stdout)")
+
     args = parser.parse_args()
 
     if args.command == "transcribe":
@@ -387,6 +549,8 @@ def main():
         match_quote(args)
     elif args.command == "locate":
         locate(args)
+    elif args.command == "stream":
+        stream(args)
     else:
         parser.print_help()
         sys.exit(1)
