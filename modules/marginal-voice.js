@@ -299,8 +299,9 @@ const MarginalVoice = {
         if (button && typeof event.append === "function") {
           event.append(button);
         }
-        // Overlay + shortcut live in the reader iframe document
-        this.injectLiveOverlay(event.reader, event.doc);
+        // Shortcut handler lives in the reader iframe document so it is
+        // available even before live mode starts. The overlay is created
+        // on demand in enterLive().
         this.attachShortcutHandler(event.reader, event.doc);
       } catch (e) {
         this.log("error", "renderToolbar injection failed:", e);
@@ -326,23 +327,31 @@ const MarginalVoice = {
     return button;
   },
 
-  injectLiveOverlay(reader, doc) {
-    if (!doc || !doc.body) return;
-    if (Zotero.Prefs.get("extensions.marginalvoice.liveShowOverlay", true) === false) return;
-    if (doc.getElementById("marginalvoice-overlay")) return;
+  createLiveOverlay(reader, doc) {
+    if (!doc || !doc.body) return null;
+    if (Zotero.Prefs.get("extensions.marginalvoice.liveShowOverlay", true) === false) return null;
+    const existing = doc.getElementById("marginalvoice-overlay");
+    if (existing) {
+      existing.style.display = "";
+      this.renderOverlayTriggers(existing, doc);
+      this.updateLiveOverlayStatus(doc, "listening");
+      return existing;
+    }
 
     const overlay = doc.createElement("div");
     overlay.id = "marginalvoice-overlay";
     overlay.style.cssText =
       "position: fixed; z-index: 99999; width: 220px; background: rgba(255,255,255,0.96);" +
       "border: 1px solid #bbb; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);" +
-      "font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 12px; color: #333; user-select: none;";
+      "font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 12px; color: #333;" +
+      "user-select: none; -moz-window-dragging: no-drag;";
 
     const header = doc.createElement("div");
     header.id = "marginalvoice-overlay-header";
     header.style.cssText =
       "display: flex; align-items: center; justify-content: space-between; padding: 5px 8px;" +
-      "background: #2c3e50; color: #fff; border-radius: 5px 5px 0 0; cursor: move; font-weight: 600;";
+      "background: #2c3e50; color: #fff; border-radius: 5px 5px 0 0; cursor: move; font-weight: 600;" +
+      "-moz-window-dragging: no-drag;";
     const title = doc.createElement("span");
     title.textContent = "Marginal Voice";
     const minimize = doc.createElement("button");
@@ -356,7 +365,7 @@ const MarginalVoice = {
     const status = doc.createElement("div");
     status.id = "marginalvoice-overlay-status";
     status.style.cssText = "padding: 4px 8px; font-weight: 600; border-bottom: 1px solid #eee;";
-    status.textContent = "Idle";
+    status.textContent = "Listening…";
 
     const list = doc.createElement("div");
     list.id = "marginalvoice-overlay-triggers";
@@ -368,9 +377,9 @@ const MarginalVoice = {
     doc.body.appendChild(overlay);
     if (!this.live.overlayDocs.includes(doc)) this.live.overlayDocs.push(doc);
 
-    this.positionOverlay(overlay);
+    this.positionOverlay(overlay, doc);
     this.renderOverlayTriggers(overlay, doc);
-    this.updateLiveOverlayStatus(doc, "idle");
+    this.updateLiveOverlayStatus(doc, "listening");
 
     minimize.addEventListener("click", () => {
       const collapsed = overlay.dataset.collapsed === "true";
@@ -382,17 +391,28 @@ const MarginalVoice = {
     });
 
     this.makeDraggable(header, overlay, doc);
+    return overlay;
   },
 
-  positionOverlay(overlay) {
+  positionOverlay(overlay, doc) {
     const pos = this.getOverlayPos();
     if (pos && typeof pos.x === "number") {
       overlay.style.right = "auto";
       overlay.style.left = pos.x + "px";
       overlay.style.top = pos.y + "px";
     } else {
+      // Default to the top-right corner of the PDF view, just below the
+      // reader's 41px toolbar so we don't sit on top of it.
+      let top = 46;
+      try {
+        const toolbar = doc && doc.querySelector(".toolbar");
+        if (toolbar) {
+          const h = toolbar.getBoundingClientRect().height;
+          if (h > 0) top = h + 5;
+        }
+      } catch (e) {}
       overlay.style.right = "16px";
-      overlay.style.top = "16px";
+      overlay.style.top = top + "px";
     }
   },
 
@@ -418,7 +438,9 @@ const MarginalVoice = {
   makeDraggable(header, overlay, doc) {
     let dragging = false;
     let startX = 0, startY = 0, origX = 0, origY = 0;
+
     header.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
       dragging = true;
       startX = e.clientX;
       startY = e.clientY;
@@ -426,19 +448,36 @@ const MarginalVoice = {
       origX = rect.left;
       origY = rect.top;
       e.preventDefault();
+      e.stopPropagation();
     });
-    doc.defaultView.addEventListener("mousemove", (e) => {
+
+    const onMove = (e) => {
       if (!dragging) return;
+      const win = doc.defaultView;
+      let dx = e.clientX - startX;
+      let dy = e.clientY - startY;
+      // Keep the overlay fully inside the iframe viewport
+      const rect = overlay.getBoundingClientRect();
+      let left = origX + dx;
+      let top = origY + dy;
+      if (win) {
+        left = Math.min(Math.max(0, left), Math.max(0, win.innerWidth - rect.width));
+        top = Math.min(Math.max(0, top), Math.max(0, win.innerHeight - rect.height));
+      }
       overlay.style.right = "auto";
-      overlay.style.left = (origX + (e.clientX - startX)) + "px";
-      overlay.style.top = (origY + (e.clientY - startY)) + "px";
-    });
-    doc.defaultView.addEventListener("mouseup", () => {
+      overlay.style.left = left + "px";
+      overlay.style.top = top + "px";
+    };
+
+    const onUp = () => {
       if (!dragging) return;
       dragging = false;
       const rect = overlay.getBoundingClientRect();
       this.setOverlayPos({ x: Math.round(rect.left), y: Math.round(rect.top) });
-    });
+    };
+
+    doc.defaultView.addEventListener("mousemove", onMove);
+    doc.defaultView.addEventListener("mouseup", onUp);
   },
 
   renderOverlayTriggers(overlay, doc) {
@@ -586,6 +625,9 @@ const MarginalVoice = {
     this.live.active = true;
     this.log("info", "Live voice annotation started for item", reader.itemID);
     this.setToolbarState(true);
+    // Show the trigger/status overlay only while live mode is active
+    const doc = this.getReaderDoc(reader);
+    if (doc) this.createLiveOverlay(reader, doc);
     this.updateLiveOverlayForReader(reader, "listening");
     await this.startCapture();
   },
@@ -704,6 +746,15 @@ const MarginalVoice = {
 
   cleanupLive() {
     const doc = this.getReaderDoc(this.live.reader);
+    // Remove the overlay when live mode ends
+    if (doc) {
+      try {
+        const overlay = doc.getElementById("marginalvoice-overlay");
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      } catch (e) {}
+      const idx = this.live.overlayDocs.indexOf(doc);
+      if (idx !== -1) this.live.overlayDocs.splice(idx, 1);
+    }
     this.live.active = false;
     this.live.capturing = false;
     this.live.reader = null;

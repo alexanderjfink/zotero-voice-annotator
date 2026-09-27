@@ -91,7 +91,7 @@ Live annotation lets you dictate highlights directly into the PDF reader:
 - **Push-to-talk**: hold the shortcut while speaking, release to stop.
 - **Voice-activated**: press to start; annotations are created automatically on silence gaps.
 
-The trigger word overlay in the top-right of the reader shows the configured trigger phrases with their colors and the current status (Idle / Listening / Processing). It can be dragged, minimized, or disabled in preferences.
+While live annotation is active, a trigger word overlay appears in the top-right corner of the PDF (just below the reader toolbar). It shows the configured trigger phrases with their colors and the current status (Listening / Processing). It can be dragged, minimized, or disabled in preferences; it is hidden whenever live annotation is not running.
 
 Note: live mode requires microphone access for the Python process. On macOS you may need to grant microphone permission to Zotero (or the terminal running Python) under System Settings → Privacy & Security → Microphone.
 
