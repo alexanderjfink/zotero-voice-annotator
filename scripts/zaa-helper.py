@@ -288,7 +288,7 @@ def match_quote(args):
         write_output(args.output, {"found": False, "error": str(e)})
 
 
-def fuzzy_sentence_match(words, quote_text, page_hint=None, min_overlap=3):
+def fuzzy_sentence_match(words, quote_text, page_hint=None, min_overlap=2):
     """Find the PDF sentence with the highest normalized word overlap with
     the spoken quote. Used for live mode where transcription is imperfect."""
     spoken = [normalize_word(w) for w in quote_text.split() if normalize_word(w)]

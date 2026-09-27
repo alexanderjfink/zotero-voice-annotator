@@ -1270,7 +1270,7 @@ const VoiceAnnotator = {
       // capped by the batch silence timeout), so annotations appear while you
       // dictate rather than only after several seconds of silence.
       const silenceTimeout = Math.min(this.getSilenceTimeout(), this.getLiveSilenceTimeout());
-      const maxQuoteWords = 12;
+      const maxQuoteWords = 20;
       const available = this.live.words.length;
 
       const resolvable = [];
@@ -1345,7 +1345,7 @@ const VoiceAnnotator = {
         color: o.color,
         resolved: false
       });
-      this.log("info", `Live trigger '${o.phrase}' detected at word ${start}`);
+      this.log("info", `Live trigger '${o.phrase}' detected at word ${start}; content: "${this.live.words.slice(end, end + 8).map(w => w.word).join(" ")}"`);
     }
     this.live.scannedWords = this.live.words.length;
   },
@@ -1369,7 +1369,10 @@ const VoiceAnnotator = {
       // Fuzzy fallback: highlight the best-overlap sentence directly.
       if (m && m.fuzzy) {
         this.log("info", `Live: fuzzy match (${m.matchedWords} words overlap): ${m.sentence}`);
-        const commentary = contentWords.map(w => w.word).join(" ");
+        // Commentary = the spoken words that aren't part of the matched
+        // sentence (i.e., everything said after the quote), matching the
+        // batch behavior of attaching only the extra commentary as a note.
+        const commentary = this.extractLiveCommentary(contentWords, m.sentence);
         const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
         const existingAnnotation = appendToExisting ? await this.findExistingAnnotation(this.live.pdfItem, m.sentence, m) : null;
         if (existingAnnotation) {
@@ -1404,6 +1407,33 @@ const VoiceAnnotator = {
     } catch (e) {
       this.log("error", "resolveLiveTrigger:", e);
     }
+  },
+
+  // Given the spoken content words after a trigger and the PDF sentence that
+  // was matched, return the words spoken *after* the quote (the commentary),
+  // i.e. the leading spoken words that align (in order, allowing gaps) with
+  // the sentence are treated as the quote; the rest is commentary.
+  extractLiveCommentary(contentWords, sentence) {
+    if (!contentWords || contentWords.length === 0) return "";
+    const sentenceWords = (sentence || "").split(/\s+/)
+      .map(w => this.normalizeWord(w))
+      .filter(w => w.length > 0);
+    let matched = 0;
+    let si = 0;
+    for (let i = 0; i < contentWords.length && si < sentenceWords.length; i++) {
+      const wn = contentWords[i].normalized || this.normalizeWord(contentWords[i].word);
+      let found = -1;
+      for (let j = si; j < sentenceWords.length; j++) {
+        if (sentenceWords[j] === wn) {
+          found = j;
+          break;
+        }
+      }
+      if (found === -1) break;
+      si = found + 1;
+      matched = i + 1;
+    }
+    return contentWords.slice(matched).map(w => w.word).join(" ");
   },
 
   async annotateLiveSegment(segment) {
