@@ -912,6 +912,12 @@ const VoiceAnnotator = {
     return cmd.path;
   },
 
+  // Builds a jar/resource URI for a bundled file, URL-encoding each path
+  // segment (the helper bundle name contains spaces).
+  resourceURI(relPath) {
+    return this.rootURI + relPath.split("/").map(encodeURIComponent).join("/");
+  },
+
   // Installs a tiny, invisible macOS helper .app that owns the microphone
   // permission. Zotero itself cannot be granted mic access on macOS (no usage
   // description, hardened runtime blocks audio input), but a small ad-hoc
@@ -955,10 +961,10 @@ const VoiceAnnotator = {
     codeSigDir.append("_CodeSignature");
     codeSigDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
 
-    const base = this.rootURI + "helper/Zotero Voice Annotator Helper.app/Contents/";
-    await this.copyResourceToFile(base + "Info.plist", contentsDir.path + "/Info.plist");
-    await this.copyResourceToFile(base + "MacOS/zva-helper", macosDir.path + "/zva-helper", 0o755);
-    await this.copyResourceToFile(base + "_CodeSignature/CodeResources", codeSigDir.path + "/CodeResources");
+    const base = "helper/Zotero Voice Annotator Helper.app/Contents/";
+    await this.copyResourceToFile(this.resourceURI(base + "Info.plist"), contentsDir.path + "/Info.plist");
+    await this.copyResourceToFile(this.resourceURI(base + "MacOS/zva-helper"), macosDir.path + "/zva-helper", 0o755);
+    await this.copyResourceToFile(this.resourceURI(base + "_CodeSignature/CodeResources"), codeSigDir.path + "/CodeResources");
 
     await Zotero.File.putContentsAsync(markerFile, "3");
     this.log("info", "Installed mic helper app:", appPath);
@@ -967,46 +973,38 @@ const VoiceAnnotator = {
 
   // Copies a bundled (possibly binary) resource from the plugin xpi to a
   // local file, byte-for-byte, so signatures and executability are preserved.
+  // Uses only NetUtil (already used by readURI) — ChromeUtils.importESModule
+  // cannot load IOUtils.sys.mjs in this Zotero build.
   async copyResourceToFile(uri, destPath, permissions) {
-    const { IOUtils } = ChromeUtils.importESModule("resource://gre/modules/IOUtils.sys.mjs");
-    let bytes = null;
-    if (typeof fetch !== "undefined") {
-      try {
-        const resp = await fetch(uri);
-        if (resp.ok) {
-          bytes = new Uint8Array(await resp.arrayBuffer());
-        }
-      } catch (e) {
-        this.log("debug", "fetch failed for", uri, e.message);
-      }
-    }
-    if (!bytes) {
-      // Fallback: read the raw stream with NetUtil (byte-safe)
-      const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-      bytes = await new Promise((resolve, reject) => {
-        NetUtil.asyncFetch(
-          { uri: Services.io.newURI(uri), loadUsingSystemPrincipal: true },
-          (inputStream, status) => {
-            if (Components.isSuccessCode(status)) {
-              const available = inputStream.available();
-              const arr = new Uint8Array(available);
-              let offset = 0;
-              while (offset < available) {
-                const n = inputStream.read(arr, offset, available - offset);
-                if (n <= 0) break;
-                offset += n;
+    const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+    await new Promise((resolve, reject) => {
+      const outFile = Zotero.File.pathToFile(destPath);
+      const fos = Components.classes["@mozilla.org/network/file-output-stream;1"]
+        .createInstance(Components.interfaces.nsIFileOutputStream);
+      fos.init(outFile, 0x02 | 0x08 | 0x20, permissions || 0o644, 0);
+      NetUtil.asyncFetch(
+        { uri: Services.io.newURI(uri), loadUsingSystemPrincipal: true },
+        (inputStream, status) => {
+          if (Components.isSuccessCode(status)) {
+            NetUtil.asyncCopy(inputStream, fos, (copyStatus) => {
+              try {
+                fos.close();
+              } catch (e) {}
+              if (Components.isSuccessCode(copyStatus)) {
+                resolve();
+              } else {
+                reject(new Error("Copy failed: " + copyStatus));
               }
-              resolve(arr);
-            } else {
-              reject(new Error("Failed to read resource " + uri + ": " + status));
-            }
+            });
+          } else {
+            try {
+              fos.close();
+            } catch (e) {}
+            reject(new Error("Failed to read resource " + uri + ": " + status));
           }
-        );
-      });
-    }
-    const opts = { mode: "overwrite" };
-    if (permissions) opts.permissions = permissions;
-    await IOUtils.write(destPath, bytes, opts);
+        }
+      );
+    });
   },
 
   async spawnStreamViaHelper(model, flushInterval) {
