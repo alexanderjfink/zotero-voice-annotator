@@ -198,7 +198,7 @@
       SP("liveMicBackend", document.getElementById("zva-liveMicBackend").value);
       SP("liveShortcut", document.getElementById("zva-liveShortcut").value);
       SP("liveFlushInterval", parseInt(document.getElementById("zva-liveFlushInterval").value, 10) || 2);
-      SP("liveSilenceTimeout", parseFloat(document.getElementById("zva-liveSilenceTimeout").value) || 1.5);
+      SP("liveSilenceTimeout", parseFloat(document.getElementById("zva-liveSilenceTimeout").value) || 3);
       SP("liveShowOverlay", document.getElementById("zva-liveShowOverlay").checked);
       saveTriggers(collectTriggers());
       mvLog("saveAllPrefs done");
@@ -223,7 +223,7 @@
       document.getElementById("zva-liveMicBackend").value = P("liveMicBackend", "terminal");
       document.getElementById("zva-liveShortcut").value = P("liveShortcut", "CmdOrCtrl+Shift+V");
       document.getElementById("zva-liveFlushInterval").value = P("liveFlushInterval", 2);
-      document.getElementById("zva-liveSilenceTimeout").value = P("liveSilenceTimeout", 1.5);
+      document.getElementById("zva-liveSilenceTimeout").value = P("liveSilenceTimeout", 3);
       document.getElementById("zva-liveShowOverlay").checked = P("liveShowOverlay", true) !== false;
       captureShortcut(document.getElementById("zva-liveShortcut"));
       renderTriggers();

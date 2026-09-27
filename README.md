@@ -107,7 +107,7 @@ Open **Zotero Preferences → Voice Annotator** to change:
 - **Microphone Backend**: `Helper app` (recommended on macOS — a tiny invisible helper records the mic and asks for its own permission), `Terminal` (routes through Terminal.app), or `Direct` (only if Zotero itself has mic access).
 - **Keyboard Shortcut**: the key combination that starts/stops live annotation (click the field, then press the keys you want).
 - **Live Transcription Interval**: how often (in seconds) live audio is transcribed in the reader.
-- **Live Utterance Pause**: how long you must pause (in seconds) before live mode finalizes the current annotation. Default 1.5s; lower it for snappier annotations, raise it if quotes are being cut off.
+- **Live Utterance Pause**: how long you must pause (in seconds) before live mode finalizes the current annotation. Default 3s; lower it for snappier annotations, raise it if commentary after a quote is being cut off.
 - **Show Trigger Word Overlay**: show/hide the trigger + status overlay in the PDF reader during live annotation.
 - **Python Path**: path to the Python interpreter if Zotero doesn't use the right one.
 - **Log Level**: how much detail to write to the Zotero debug log.

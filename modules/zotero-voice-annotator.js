@@ -82,9 +82,9 @@ const VoiceAnnotator = {
     try {
       const val = Zotero.Prefs.get("extensions.zotero-voice-annotator.liveSilenceTimeout", true);
       const num = Number(val);
-      return Number.isFinite(num) && num > 0 ? num : 1.5;
+      return Number.isFinite(num) && num > 0 ? num : 3;
     } catch (e) {
-      return 1.5;
+      return 3;
     }
   },
 
@@ -162,7 +162,7 @@ const VoiceAnnotator = {
       liveShortcut: "CmdOrCtrl+Shift+V",
       liveShowOverlay: true,
       liveFlushInterval: 2,
-      liveSilenceTimeout: 1.5,
+      liveSilenceTimeout: 3,
       liveMicBackend: "helper",
       liveOverlayPos: "",
       triggers: JSON.stringify(this.defaultTriggers)
@@ -1380,16 +1380,17 @@ const VoiceAnnotator = {
           this.log("info", "Live: appended commentary (fuzzy):", m.sentence);
         } else {
           await this.createHighlightAnnotation(this.live.pdfItem, m.sentence, commentary, m, occ.color);
-          this.log("info", "Live: created annotation (fuzzy):", m.sentence);
+          this.log("info", `Live: created annotation (fuzzy): ${m.sentence} | commentary: "${commentary}"`);
         }
         return;
       }
 
       const matchedCount = (m && m.matchedWords) ? Math.min(m.matchedWords, contentWords.length) : 0;
-      // A 1-word exact match is unreliable (the matcher just picks the first
-      // occurrence of that word in the PDF); skip it rather than highlight an
-      // arbitrary word.
-      if (matchedCount < 2) {
+      // Section headings are often a single word, so the "Title" trigger
+      // accepts 1-word matches; other triggers need at least 2 words to avoid
+      // arbitrary single-word highlights.
+      const minMatch = /title/i.test(occ.phrase) ? 1 : 2;
+      if (matchedCount < minMatch) {
         this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} has no reliable match (${matchedCount} word(s)); skipping`);
         return;
       }
@@ -1463,7 +1464,7 @@ const VoiceAnnotator = {
       this.log("info", "Live: appended commentary:", finalMatch.sentence);
     } else {
       await this.createHighlightAnnotation(pdfItem, finalMatch.sentence, commentary, finalMatch, segment.color);
-      this.log("info", "Live: created annotation:", finalMatch.sentence);
+      this.log("info", `Live: created annotation: ${finalMatch.sentence} | commentary: "${commentary}"`);
     }
   },
 
