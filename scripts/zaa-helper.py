@@ -415,25 +415,27 @@ def stream(args):
         except OSError:
             pass
 
-    chunks = []            # list of numpy arrays (raw mic audio)
-    total_samples = 0      # running count of recorded samples
-    flushed_samples = 0    # samples already transcribed
+    chunks = []            # list of numpy arrays (raw mic audio, not yet transcribed)
+    abs_total = 0          # running count of recorded samples (monotonic)
+    abs_flushed = 0        # samples transcribed so far (monotonic)
 
     def do_flush(force=False):
-        nonlocal total_samples, flushed_samples, chunks
-        available = total_samples - flushed_samples
+        nonlocal abs_total, abs_flushed, chunks
+        available = abs_total - abs_flushed
         if available < min_chunk * sample_rate and not force:
             return
         if available <= 0:
             return
         try:
-            audio = np.concatenate(chunks)[flushed_samples:total_samples]
+            # Squeeze the (frames, channels=1) stream into a 1D array,
+            # which faster-whisper requires.
+            audio = np.concatenate(chunks).reshape(-1)
         except Exception as e:
             emit({"type": "error", "error": f"Audio buffer error: {e}"})
             return
         if audio.size == 0:
             return
-        offset = flushed_samples / sample_rate
+        offset = abs_flushed / sample_rate
         try:
             segments, _info = model.transcribe(
                 audio,
@@ -466,26 +468,16 @@ def stream(args):
                 })
         if words:
             emit({"type": "words", "offset": round(offset, 3), "words": words})
-        flushed_samples = total_samples
-
-        # Trim already-flushed audio from the buffer to bound memory usage.
-        consumed = 0
-        keep_from = 0
-        for i, c in enumerate(chunks):
-            if consumed + len(c) <= flushed_samples:
-                consumed += len(c)
-                keep_from = i + 1
-            else:
-                break
-        if keep_from > 0:
-            chunks = chunks[keep_from:]
-            flushed_samples -= consumed
-            total_samples -= consumed
+        # Everything in the buffer has now been transcribed; clear it and
+        # advance the absolute counters so the next flush has correct
+        # absolute timestamps and bounded memory usage.
+        abs_flushed = abs_total
+        chunks = []
 
     def callback(indata, frames, time_info, status):
-        nonlocal total_samples
+        nonlocal abs_total
         chunks.append(indata.copy())
-        total_samples += len(indata)
+        abs_total += len(indata)
 
     emit({"type": "ready"})
 
