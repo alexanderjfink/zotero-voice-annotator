@@ -53,7 +53,7 @@ def transcribe(args):
         texts = []
         words = []
         for segment in segments:
-            texts.append(segment.text)
+            texts.append(segment.text.strip())
             segment_words = getattr(segment, "words", None)
             if segment_words:
                 for w in segment_words:
@@ -63,6 +63,7 @@ def transcribe(args):
                         word_text, start, end = w[0], w[1], w[2]
                     else:
                         word_text, start, end = w.word, w.start, w.end
+                    word_text = word_text.strip()
                     clean = normalize_word(word_text)
                     if clean:
                         words.append({
@@ -72,7 +73,8 @@ def transcribe(args):
                             "end": round(float(end), 3)
                         })
 
-        transcript = " ".join(texts).strip()
+        # Join segment texts with single spaces and collapse any runs of whitespace
+        transcript = re.sub(r"\s+", " ", " ".join(texts)).strip()
         write_output(args.output, {
             "text": transcript,
             "words": words,

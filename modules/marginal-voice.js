@@ -692,12 +692,15 @@ const MarginalVoice = {
 
   buildWordList(transcript, words) {
     if (words && Array.isArray(words) && words.length > 0) {
-      return words.map(w => ({
-        word: w.word || "",
-        normalized: w.normalized || this.normalizeWord(w.word || ""),
-        start: typeof w.start === "number" ? w.start : null,
-        end: typeof w.end === "number" ? w.end : null
-      })).filter(w => w.word.length > 0);
+      return words.map(w => {
+        const raw = (w.word || "").trim();
+        return {
+          word: raw,
+          normalized: w.normalized || this.normalizeWord(raw),
+          start: typeof w.start === "number" ? w.start : null,
+          end: typeof w.end === "number" ? w.end : null
+        };
+      }).filter(w => w.word.length > 0);
     }
 
     // Fallback: split transcript into words without timestamps
