@@ -261,6 +261,12 @@ def match_quote(args):
         words = extract_pdf_words(doc)
         doc.close()
 
+        # In live mode we know which page the user is reading; restrict the
+        # search to that page so a short/fuzzy match can't land on a wrong
+        # section elsewhere in the document.
+        if args.strict_page and args.page_hint is not None:
+            words = [w for w in words if w["page"] == args.page_hint]
+
         result = find_quote_in_words(words, args.quote, args.page_hint)
         # Require a solid exact match (>= 3 words); anything less is likely a
         # garbled live transcription. Fall back to a sentence-level fuzzy match
@@ -590,6 +596,7 @@ def main():
     match_parser.add_argument("--pdf", required=True, help="Path to PDF file")
     match_parser.add_argument("--quote", required=True, help="Quote text to match")
     match_parser.add_argument("--page-hint", type=int, default=None, help="Preferred page index (0-based)")
+    match_parser.add_argument("--strict-page", action="store_true", help="Only search the page given by --page-hint (live mode)")
     match_parser.add_argument("--output", help="Output JSON file path")
 
     # Locate subcommand

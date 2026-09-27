@@ -616,6 +616,19 @@ const VoiceAnnotator = {
     return (reader._iframeWindow && reader._iframeWindow.document) || null;
   },
 
+  // Current PDF page the user is viewing (0-based), so matches anchor to the
+  // page they're actually reading instead of anywhere in the document.
+  getCurrentReaderPage(reader) {
+    try {
+      const win = (reader && (reader._primaryView && reader._primaryView._iframeWindow)) || (reader && reader._iframeWindow);
+      if (win && win.PDFViewerApplication && win.PDFViewerApplication.pdfViewer) {
+        const n = win.PDFViewerApplication.pdfViewer.currentPageNumber;
+        if (typeof n === "number" && n > 0) return n - 1;
+      }
+    } catch (e) {}
+    return undefined;
+  },
+
   attachShortcutHandler(reader, doc) {
     if (!doc || doc._mvShortcutAttached) return;
     doc._mvShortcutAttached = true;
@@ -1349,7 +1362,9 @@ const VoiceAnnotator = {
       // transcriptions.
       const probe = contentWords.slice(0, Math.min(6, contentWords.length)).map(w => w.word).join(" ");
       this.log("info", `Live: matching '${probe}'`);
-      const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
+      const pageHint = this.getCurrentReaderPage(this.live.reader);
+      this.log("info", `Live: current page ${pageHint !== undefined ? pageHint + 1 : "unknown"}`);
+      const m = await this.matchQuoteInPDF(this.live.pdfPath, probe, pageHint, true);
 
       // Fuzzy fallback: highlight the best-overlap sentence directly.
       if (m && m.fuzzy) {
@@ -1394,9 +1409,10 @@ const VoiceAnnotator = {
   async annotateLiveSegment(segment) {
     const pdfPath = this.live.pdfPath;
     const pdfItem = this.live.pdfItem;
+    const pageHint = this.getCurrentReaderPage(this.live.reader);
     this.log("info", `Live segment for trigger '${segment.trigger}': quote='${segment.quoteCandidate}'`);
 
-    const match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate);
+    const match = await this.matchQuoteInPDF(pdfPath, segment.quoteCandidate, pageHint, true);
     if (!match) {
       this.log("warn", "Live: no match for quote:", segment.quoteCandidate);
       return;
@@ -1407,7 +1423,7 @@ const VoiceAnnotator = {
     const commentary = expanded.commentary || match.commentary || "";
 
     const finalMatch = quoteCandidate !== segment.quoteCandidate
-      ? (await this.matchQuoteInPDF(pdfPath, quoteCandidate)) || match
+      ? (await this.matchQuoteInPDF(pdfPath, quoteCandidate, pageHint, true)) || match
       : match;
 
     const appendToExisting = Zotero.Prefs.get("extensions.zotero-voice-annotator.skipDuplicates", true) !== false;
@@ -2154,7 +2170,7 @@ const VoiceAnnotator = {
     return s1.substring(endIndex - maxLen, endIndex);
   },
 
-  async matchQuoteInPDF(pdfPath, quoteCandidate, pageHint) {
+  async matchQuoteInPDF(pdfPath, quoteCandidate, pageHint, strictPage) {
     const pythonPath = this.getPythonPath();
     const helperPath = this.getHelperScriptPath();
 
@@ -2165,6 +2181,7 @@ const VoiceAnnotator = {
     const args = [helperPath, "match", "--pdf", pdfPath, "--quote", quoteCandidate, "--output", tmpFile.path];
     if (pageHint !== undefined && pageHint !== null) {
       args.push("--page-hint", String(pageHint));
+      if (strictPage) args.push("--strict-page");
     }
 
     this.log("debug", "Matching quote:", quoteCandidate);
