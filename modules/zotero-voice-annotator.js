@@ -225,12 +225,17 @@ const VoiceAnnotator = {
       this.log("debug", "Extracting helper script from", helperURI);
       const content = await this.readURI(helperURI);
 
-      const tmpDir = Zotero.getTempDirectory();
-      const tmpFile = tmpDir.clone();
-      tmpFile.append("zaa-helper.py");
-      if (tmpFile.exists()) {
-        tmpFile.remove(false);
+      // Write to a persistent location (the profile's zva-helper dir), not
+      // Zotero's temp directory, which gets cleaned up periodically and
+      // would delete the script mid-session.
+      const profileFile = Zotero.File.pathToFile(Zotero.Profile.dir);
+      const helperDir = profileFile.clone();
+      helperDir.append("zva-helper");
+      if (!helperDir.exists()) {
+        helperDir.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o755);
       }
+      const tmpFile = helperDir.clone();
+      tmpFile.append("zaa-helper.py");
       await Zotero.File.putContentsAsync(tmpFile, content);
       this.helperScriptTempPath = tmpFile.path;
       this.log("info", "Helper script extracted to", this.helperScriptTempPath);
@@ -1346,7 +1351,7 @@ const VoiceAnnotator = {
       const m = await this.matchQuoteInPDF(this.live.pdfPath, probe);
       const matchedCount = (m && m.matchedWords) ? Math.min(m.matchedWords, contentWords.length) : 0;
       if (matchedCount === 0) {
-        this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} did not match the PDF; skipping`);
+        this.log("info", `Live trigger '${occ.phrase}' at word ${occ.startWordIndex} did not match the PDF; skipping (match=${m ? JSON.stringify(m) : "null"})`);
         return;
       }
       this.log("info", `Live: matched ${matchedCount} words`);
@@ -2158,6 +2163,9 @@ const VoiceAnnotator = {
           matchedWords: json.matched_words || 0
         };
       }
+      // Diagnostic: show exactly what the helper returned so a failure here
+      // isn't invisible.
+      this.log("info", `Match helper reported no match. Raw output: ${output}`);
       return null;
     } catch (e) {
       this.log("error", "Failed to parse match result:", e);
